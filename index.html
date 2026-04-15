@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>電路視覺化教學助手</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow" id="heroEyebrow">Series / Parallel Learning Studio</p>
+          <h1 id="heroTitle">電路視覺化教學助手</h1>
+          <p class="hero-copy" id="heroCopy">
+            讓學生用文字或電路圖片生成 Falstad 專用代碼，再配合動態模擬觀察串聯、並聯與短路特徵。
+          </p>
+        </div>
+        <div class="hero-tools">
+          <div class="language-switch" aria-label="Language switch">
+            <button class="lang-button is-active" id="langZhButton" type="button">繁中</button>
+            <button class="lang-button" id="langEnButton" type="button">English</button>
+          </div>
+          <div class="hero-note">
+            <span class="note-chip" id="chipAi">AI 生成</span>
+            <span class="note-chip" id="chipSim">Falstad 模擬</span>
+            <span class="note-chip" id="chipGuide">教學引導</span>
+          </div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="panel control-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker" id="step1Label">Step 1</p>
+              <h2 id="inputSectionTitle">輸入需求</h2>
+            </div>
+            <span class="status-pill" id="apiStatus">尚未生成</span>
+          </div>
+
+          <label class="field">
+            <span id="promptLabel">文字需求</span>
+            <textarea
+              id="userPrompt"
+              rows="8"
+              placeholder="例如：請設計一個由兩個電阻組成的串聯電路，並加入一個短路變形圖供比較。"
+            ></textarea>
+          </label>
+
+          <label class="field">
+            <span id="imageLabel">電路圖圖片（可選）</span>
+            <input id="imageInput" type="file" accept="image/*" />
+          </label>
+
+          <div class="image-preview hidden" id="imagePreviewWrap">
+            <img id="imagePreview" alt="已上載的電路圖預覽" />
+            <button class="ghost-button small" id="removeImageButton" type="button">
+              移除圖片
+            </button>
+          </div>
+
+          <div class="action-row">
+            <button class="primary-button" id="generateButton" type="button">
+              Generate
+            </button>
+            <button class="ghost-button" id="exampleButton" type="button">
+              載入示例
+            </button>
+          </div>
+
+          <p class="helper-text" id="feedbackText">
+            生成後，系統會把 Falstad 專用代碼與教學指引分別填到下方兩個輸出框。
+          </p>
+
+          <div class="output-stack">
+            <section class="output-card">
+              <div class="output-header">
+                <div>
+                  <p class="panel-kicker" id="step2Label">Step 2</p>
+                  <h3 id="codeSectionTitle">Falstad 專用代碼</h3>
+                </div>
+                <div class="header-actions">
+                  <button class="ghost-button small" id="copyCodeButton" type="button">
+                    複製
+                  </button>
+                  <button class="ghost-button small" id="loadToFalstadButton" type="button">
+                    載入右側模擬器
+                  </button>
+                </div>
+              </div>
+              <textarea
+                id="falstadCode"
+                rows="12"
+                readonly
+                placeholder="AI 生成的 Falstad 匯入代碼會顯示在這裡。"
+              ></textarea>
+            </section>
+
+            <section class="output-card">
+              <div class="output-header">
+                <div>
+                  <p class="panel-kicker" id="step3Label">Step 3</p>
+                  <h3 id="guideSectionTitle">Falstad 視覺化教學指引</h3>
+                </div>
+                <button class="ghost-button small" id="copyGuideButton" type="button">
+                  複製
+                </button>
+              </div>
+              <textarea
+                id="teachingGuide"
+                rows="12"
+                readonly
+                placeholder="AI 生成的觀察重點與操作建議會顯示在這裡。"
+              ></textarea>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel simulator-panel">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker" id="step4Label">Step 4</p>
+              <h2 id="simulatorTitle">Falstad Circuit Simulation</h2>
+            </div>
+            <span class="status-pill" id="simulatorStatus">等待載入</span>
+          </div>
+
+          <div class="simulator-stage" id="simulatorStage">
+            <iframe
+              id="falstadFrame"
+              title="Falstad Circuit Simulator"
+              src="/circuit/circuitjs.html?whiteBackground=false"
+            ></iframe>
+
+            <div class="simulator-overlay" id="simulatorOverlay">
+              <div class="overlay-card">
+                <h3 id="overlayTitle">本地 Falstad 尚未成功載入</h3>
+                <p id="overlayBody">
+                  此專案已內建本地 CircuitJS1 runtime。若右側仍未顯示模擬器，通常是因為你直接雙擊
+                  <code>index.html</code>
+                  開啟，或本地伺服器尚未啟動。
+                </p>
+                <ol>
+                  <li id="overlayItem1">請先用 <code>serve.command</code> 或 <code>ruby server.rb</code> 啟動專案。</li>
+                  <li id="overlayItem2">確認網址是 <code>http://localhost:8080</code>。</li>
+                  <li id="overlayItem3">重新整理本頁。</li>
+                </ol>
+                <p class="overlay-tip" id="overlayTip">
+                  如果仍未載入，請檢查 <code>falstad/circuitjs.html</code> 是否存在，並重新啟動本地 server。
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="simulator-toolbar">
+            <button class="ghost-button" id="refreshSimulatorButton" type="button">
+              重新檢查模擬器
+            </button>
+            <button class="ghost-button" id="exportCodeButton" type="button">
+              從右側匯出目前電路
+            </button>
+          </div>
+
+          <div class="tips-card">
+            <h3 id="flowTitle">學生建議流程</h3>
+            <ol>
+              <li id="flowItem1">在左側輸入電路需求或上載題目圖片。</li>
+              <li id="flowItem2">按下 `Generate` 取得 Falstad 代碼與教學指引。</li>
+              <li id="flowItem3">按 `載入右側模擬器`，或手動貼到 Falstad 匯入。</li>
+              <li id="flowItem4">觀察黃色小圓點、綠色電壓深淺與分岔位置，進行推理。</li>
+            </ol>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
