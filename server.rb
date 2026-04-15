@@ -149,6 +149,44 @@ def build_json_repair_payload(raw_text)
   }
 end
 
+def build_strict_json_repair_payload(raw_text)
+  {
+    "contents" => [
+      {
+        "role" => "user",
+        "parts" => [
+          {
+            "text" => [
+              "Convert the content below into strict JSON.",
+              "Output only one JSON object.",
+              "Required keys: analysis, falstad_code, teaching_guide.",
+              "Each value must be a string.",
+              "Do not use markdown fences.",
+              "",
+              raw_text
+            ].join("\n")
+          }
+        ]
+      }
+    ],
+    "generationConfig" => {
+      "responseMimeType" => "application/json",
+      "responseSchema" => {
+        "type" => "object",
+        "properties" => {
+          "analysis" => { "type" => "string" },
+          "falstad_code" => { "type" => "string" },
+          "teaching_guide" => { "type" => "string" }
+        },
+        "required" => ["analysis", "falstad_code", "teaching_guide"],
+        "propertyOrdering" => ["analysis", "falstad_code", "teaching_guide"]
+      },
+      "temperature" => 0,
+      "maxOutputTokens" => 768
+    }
+  }
+end
+
 def extract_output_text(data)
   fragments = []
   Array(data["candidates"]).each do |candidate|
@@ -161,13 +199,106 @@ def extract_output_text(data)
   fragments.join("\n")
 end
 
-def parse_model_json(text)
-  JSON.parse(text)
-rescue JSON::ParserError
-  match = text.to_s.match(/\{.*\}/m)
-  raise unless match
+def normalize_model_text(text)
+  text.to_s
+    .gsub("\r\n", "\n")
+    .gsub(/\A```(?:json)?\s*/i, "")
+    .gsub(/\s*```\z/m, "")
+    .strip
+end
 
-  JSON.parse(match[0])
+def extract_json_candidate(text)
+  normalized = normalize_model_text(text)
+  return normalized if normalized.start_with?("{") && normalized.end_with?("}")
+
+  start_index = normalized.index("{")
+  return nil unless start_index
+
+  depth = 0
+  in_string = false
+  escaped = false
+
+  normalized.chars.each_with_index do |char, index|
+    next if index < start_index
+
+    if in_string
+      if escaped
+        escaped = false
+      elsif char == "\\"
+        escaped = true
+      elsif char == "\""
+        in_string = false
+      end
+      next
+    end
+
+    case char
+    when "\""
+      in_string = true
+    when "{"
+      depth += 1
+    when "}"
+      depth -= 1
+      if depth.zero?
+        return normalized[start_index..index]
+      end
+    end
+  end
+
+  nil
+end
+
+def regex_extract_field(text, key)
+  normalized = normalize_model_text(text)
+
+  quoted_match = normalized.match(/["']#{Regexp.escape(key)}["']\s*:\s*"((?:\\.|[^"])*)"/m)
+  return JSON.parse(%("#{quoted_match[1]}")) if quoted_match
+
+  block_match = normalized.match(/^#{Regexp.escape(key)}\s*:\s*(.+?)(?=^\w+\s*:|\z)/mi)
+  return block_match[1].strip if block_match
+
+  nil
+end
+
+def fallback_field_parse(text)
+  parsed = {
+    "analysis" => regex_extract_field(text, "analysis"),
+    "falstad_code" => regex_extract_field(text, "falstad_code"),
+    "teaching_guide" => regex_extract_field(text, "teaching_guide")
+  }
+
+  return nil unless parsed.values.all? { |value| value.is_a?(String) && !value.strip.empty? }
+
+  parsed
+end
+
+def ensure_required_fields(parsed)
+  return nil unless parsed.is_a?(Hash)
+
+  normalized = {}
+  %w[analysis falstad_code teaching_guide].each do |key|
+    value = parsed[key] || parsed[key.to_sym]
+    return nil unless value.is_a?(String) && !value.strip.empty?
+
+    normalized[key] = value.strip
+  end
+
+  normalized
+end
+
+def parse_model_json(text)
+  normalized = normalize_model_text(text)
+  direct = ensure_required_fields(JSON.parse(normalized)) rescue nil
+  return direct if direct
+
+  candidate = extract_json_candidate(normalized)
+  from_candidate = ensure_required_fields(JSON.parse(candidate)) rescue nil
+  return from_candidate if from_candidate
+
+  from_fields = fallback_field_parse(normalized)
+  return from_fields if from_fields
+
+  raise JSON::ParserError, "Unable to parse model output as required JSON"
 end
 
 def json_response(res, status:, body:)
@@ -289,6 +420,15 @@ def repair_generation_json(raw_text, api_key, model)
   repaired = JSON.parse(body)
   repaired_text = extract_output_text(repaired)
   raise JSON::ParserError, "JSON repair returned empty text" if repaired_text.to_s.strip.empty?
+
+  repaired_text
+rescue JSON::ParserError
+  status_code, body = request_gemini(build_strict_json_repair_payload(raw_text), api_key, model)
+  raise "JSON 嚴格修復請求失敗。" unless status_code.between?(200, 299)
+
+  repaired = JSON.parse(body)
+  repaired_text = extract_output_text(repaired)
+  raise JSON::ParserError, "Strict JSON repair returned empty text" if repaired_text.to_s.strip.empty?
 
   repaired_text
 end
