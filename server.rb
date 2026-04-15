@@ -10,8 +10,8 @@ require "net/http"
 ROOT = Pathname.new(__dir__)
 CONFIG_PATH = ROOT.join("server-config.local.json")
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-MAX_OUTPUT_TOKENS = 3072
-COMPACT_MAX_OUTPUT_TOKENS = 1536
+MAX_OUTPUT_TOKENS = 6144
+COMPACT_MAX_OUTPUT_TOKENS = 4096
 CURL_RETRY_ATTEMPTS = 3
 
 SYSTEM_PROMPT = <<~PROMPT
@@ -41,7 +41,7 @@ PROMPT
 def load_config
   defaults = {
     "google_api_key" => ENV["GEMINI_API_KEY"] || ENV["GOOGLE_API_KEY"],
-    "google_model" => ENV.fetch("GOOGLE_MODEL", "gemini-3-flash-preview"),
+    "google_model" => ENV.fetch("GOOGLE_MODEL", "gemini-2.5-flash-lite"),
     "port" => ENV.fetch("PORT", "8080").to_i
   }
 
@@ -207,6 +207,21 @@ def build_raw_output(text, upstream_data = nil)
   JSON.pretty_generate(upstream_data)
 rescue StandardError
   upstream_data.to_s
+end
+
+def truncated_json_output?(text)
+  normalized = normalize_model_text(text)
+  return false if normalized.empty?
+  return false unless normalized.start_with?("{")
+
+  !normalized.end_with?("}") || extract_json_candidate(normalized).nil?
+end
+
+def response_truncated?(data)
+  finish_reasons = Array(data["candidates"]).filter_map { |candidate| candidate["finishReason"] }
+  return true if finish_reasons.include?("MAX_TOKENS")
+
+  truncated_json_output?(extract_output_text(data))
 end
 
 def normalize_model_text(text)
@@ -413,6 +428,11 @@ def perform_generation(payloads, api_key, preferred_model)
     begin
       status_code, body = request_gemini(payload, api_key, preferred_model)
       parsed = JSON.parse(body)
+      if status_code.between?(200, 299) && response_truncated?(parsed)
+        last_error = StandardError.new("AI 輸出因長度限制被截斷，已自動改用更精簡版本重試。")
+        next
+      end
+
       return [status_code, parsed, preferred_model]
     rescue StandardError => e
       last_error = e
