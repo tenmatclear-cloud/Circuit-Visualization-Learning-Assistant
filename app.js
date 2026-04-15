@@ -23,7 +23,7 @@ const translations = {
     removeImageButton: "移除圖片",
     generateButton: "Generate",
     exampleButton: "載入示例",
-    helperText: "生成後，系統會把 Falstad 專用代碼、教學指引與 Raw AI Output 填到下方輸出框。",
+    helperText: "生成後，你可在 Step 2 直接修改 Falstad 專用代碼，再載入右側模擬器測試。",
     step2Label: "Step 2",
     codeSectionTitle: "Falstad 專用代碼",
     copyCodeButton: "複製",
@@ -69,7 +69,7 @@ const translations = {
     feedback: {
       needInput: "請先輸入文字需求，或上載一張電路圖。",
       generating: "本地後端正在請求 AI，整理 Falstad 代碼與教學指引...",
-      generated: "生成完成，可以直接複製或載入右側 Falstad 模擬器。",
+      generated: "生成完成，可直接修改 Step 2 代碼，或載入右側 Falstad 模擬器。",
       generateFailed: "生成失敗：",
       noCopy: "目前沒有可複製的內容。",
       copiedCode: "已複製 Falstad 代碼",
@@ -109,7 +109,7 @@ const translations = {
     generateButton: "Generate",
     exampleButton: "Load Example",
     helperText:
-      "After generation, the Falstad code, teaching guide, and raw AI output will appear in the output boxes below.",
+      "After generation, you can edit the Step 2 Falstad code directly before loading it into the simulator.",
     step2Label: "Step 2",
     codeSectionTitle: "Falstad Code",
     copyCodeButton: "Copy",
@@ -155,7 +155,7 @@ const translations = {
     feedback: {
       needInput: "Please enter a text request or upload a circuit image first.",
       generating: "The local backend is asking the AI to prepare Falstad code and a teaching guide...",
-      generated: "Generation completed. You can now copy the result or load it into the simulator.",
+      generated: "Generation completed. You can edit the Step 2 code directly or load it into the simulator.",
       generateFailed: "Generation failed: ",
       noCopy: "There is nothing to copy yet.",
       copiedCode: "Falstad code copied",
@@ -423,6 +423,7 @@ function translateBackendError(message) {
     "請提供文字需求或圖片。": "Please provide a text request or an image.",
     "圖片格式無法解析，請重新上載。": "The image format could not be parsed. Please upload it again.",
     "AI 沒有回傳文字內容，請再試一次。": "The AI returned no text. Please try again.",
+    "AI 規劃階段沒有回傳可用內容，請再試一次。": "The AI planning step returned no usable content. Please try again.",
     "AI 回應不是有效 JSON，請再按一次 Generate。": "The AI response was not valid JSON. Please click Generate again.",
     "Google API 連線中斷。": "The Google API connection was interrupted.",
     "Google API 連線失敗。": "The Google API connection failed.",

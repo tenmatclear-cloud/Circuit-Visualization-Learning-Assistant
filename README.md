@@ -1,159 +1,161 @@
 # 電路視覺化教學助手
 
-這個專案現在是「前端 + 本地後端代理 + 本地 Falstad simulator」版本。
+這個專案是一個給學生學習串聯、並聯與短路概念的教學網站，結合了：
 
-學生流程如下：
+- 雙語前端介面：繁體中文 / English
+- Google Gemini 後端代理
+- 本地或線上部署的 Falstad Circuit Simulator
+- `Raw AI Output` 偵錯視窗
 
-1. 在左側輸入文字需求，或上載電路圖圖片。
-2. 前端把資料送到本地後端 `/api/generate`。
-3. 後端代你呼叫 Google Gemini API，回傳：
-   - Falstad 專用代碼
-   - Falstad 視覺化教學指引
-4. 學生可直接把代碼載入右側本地 Falstad simulator 觀察。
+學生可用文字或電路圖圖片生成：
 
-## 現在的檔案結構
+- Falstad 專用代碼
+- 視覺化教學指引
+
+然後直接載入右側 Falstad 模擬器觀察電流與電壓變化。
+
+## 主要功能
+
+- 文字需求輸入
+- 電路圖圖片上載
+- Gemini API 後端代理，不把 API key 暴露在前端
+- Falstad 專用代碼輸出
+- 視覺化教學指引輸出
+- `Raw AI Output` 顯示模型原始回覆，方便排錯
+- 自動把字面 `\\n` 還原成真正換行，避免 Falstad 匯入失敗
+- 偵測 Gemini 輸出截斷後自動重試更精簡版本
+- 右側內嵌 Falstad 模擬器
+- 雙語切換時同步切換 Falstad 面板語言
+
+## 專案結構
 
 - `index.html`: 主畫面
-- `styles.css`: 樣式
-- `app.js`: 前端互動，呼叫本地 `/api/generate`
-- `server.rb`: Ruby 本地伺服器與 Google Gemini API 後端代理
-- `server-config.local.json`: 本地 Gemini / Gemma API key 與模型設定
-- `serve.command`: 一鍵啟動伺服器
-- `falstad/`: 可直接運行的 CircuitJS1 靜態 runtime
-- `vendor/circuitjs1-source/`: GitHub 原始碼快照
+- `styles.css`: 視覺樣式
+- `app.js`: 前端互動、雙語切換、Falstad 載入、Raw AI Output 顯示
+- `server.rb`: Ruby 後端代理，呼叫 Gemini API 並整理輸出
+- `server-config.local.json`: 本地開發用 API key / model / port 設定
+- `serve.command`: 一鍵啟動本地 server
+- `falstad/`: 可直接運行的 CircuitJS1 runtime
+- `vendor/circuitjs1-source/`: CircuitJS1 GitHub source snapshot
+- `Dockerfile`, `Gemfile`, `.dockerignore`: Render / Docker 部署用檔案
 
-## 後端代理版本怎樣運作
+## 運作流程
 
-### 前端
+1. 學生在左側輸入文字需求或上載圖片
+2. 前端把資料送到 `POST /api/generate`
+3. `server.rb` 先用 `planner` 階段做隱藏規劃，再用 `formatter` 階段輸出嚴格 JSON
+4. 後端回傳：
+   - `analysis`
+   - `falstad_code`
+   - `teaching_guide`
+   - `raw_output`
+5. 前端把 Falstad 代碼、教學指引與 Raw AI Output 顯示出來
+6. 學生可直接按 `載入右側模擬器` 匯入 Falstad
 
-前端不再直接持有 API key。瀏覽器只會送：
-
-- `promptText`
-- `imageDataUrl`
-
-到本地：
-
-```txt
-POST /api/generate
-```
-
-### 後端
-
-`server.rb` 會：
-
-1. 讀取 `server-config.local.json`
-2. 組合你的教學 prompt
-3. 呼叫 Google Gemini API
-4. 把模型輸出的 JSON 整理後回傳給前端
-
-這樣做的好處是：
-
-- API key 不會暴露在前端 JavaScript
-- 之後若要加使用記錄、題庫、快取，比較容易擴充
-
-## API key 放哪裡
+## 本地設定
 
 請編輯：
-
-```txt
-server-config.local.json
-```
-
-內容如下：
 
 ```json
 {
   "google_api_key": "PASTE_YOUR_API_KEY_HERE",
-  "google_model": "gemini-2.5-flash-lite",
+  "google_model": "gemini-3-flash",
   "port": 8080
 }
 ```
 
-如果你想走較快、較省資源的模型，建議先用：
+說明：
 
-- `gemini-2.5-flash-lite`
+- `google_api_key`: 你的 Google AI Studio / Gemini API key
+- `google_model`: 你要使用的模型，例如 `gemini-3-flash`
+- `port`: 本地 server port，預設 `8080`
 
-如之後你想切回其他 Gemini / Gemma hosted model，再改 `google_model` 即可。
+## 本地啟動
 
-## 如何啟動
-
-### 最簡單方式
-
-直接執行：
+### 方法 1：直接執行
 
 ```bash
 /Users/clear/Documents/New\ project/serve.command
 ```
 
-### 或用命令列
+### 方法 2：命令列
 
 ```bash
 cd "/Users/clear/Documents/New project"
 ruby server.rb
 ```
 
-啟動後打開：
+開啟：
 
 ```txt
 http://localhost:8080
 ```
 
-## 如何放上網
+## API 說明
 
-我建議你先用 Render 部署，對這個專案來說最省事。原因是：
+### `POST /api/generate`
 
-- 這個網站不是純靜態頁，有 Ruby 後端代理
-- Render 可直接部署 Web Service
-- Render 支援從專案內的 Dockerfile 建置
-- Render 會提供公開網址，之後也可加自訂網域與 HTTPS
+Request body:
 
-### 我已經幫你準備好的部署檔
+```json
+{
+  "promptText": "兩個電阻串聯",
+  "imageDataUrl": ""
+}
+```
 
-- `Dockerfile`
-- `.dockerignore`
-- `Gemfile`
+Response body:
 
-這表示你不需要另外改專案結構，就可以直接上傳部署。
+```json
+{
+  "analysis": "...",
+  "falstad_code": "...",
+  "teaching_guide": "...",
+  "raw_output": "...",
+  "model_used": "gemini-3-flash"
+}
+```
 
-### Render 部署步驟
+其中 `raw_output` 目前會同時顯示：
 
-1. 把這個專案推到 GitHub。
-2. 到 Render 建立一個新的 Web Service。
-3. 連接你的 GitHub repo。
-4. 在建立服務時：
-   - Language / Runtime：選 `Docker`
-   - Branch：選你的主分支
-5. 在 Environment Variables 內加入：
+- `Planner`
+- `Formatter`
+
+方便觀察兩階段生成的實際輸出。
+
+### `GET /api/health`
+
+用來確認服務是否啟動，以及目前載入的模型設定。
+
+## Render 部署
+
+### 1. 推到 GitHub
+
+把整個專案推到 GitHub，但不要把真正的 API key 提交到 repo。
+
+### 2. 在 Render 建立 Web Service
+
+- Source: 你的 GitHub repo
+- Runtime: `Docker`
+
+### 3. 在 Render 設定環境變數
 
 ```txt
-GOOGLE_API_KEY=你的新 API key
-GOOGLE_MODEL=gemini-3-flash-preview
-PORT=10000
+GOOGLE_API_KEY=你的 Gemini API key
+GOOGLE_MODEL=gemini-3-flash
 HOST=0.0.0.0
+PORT=10000
 ```
 
-6. 按 Deploy。
-7. 部署完成後，Render 會給你一個公開網址，像是：
+### 4. Deploy
 
-```txt
-https://your-app-name.onrender.com
-```
+部署完成後，Render 會提供公開網址。
 
-### 自訂網域
+## Falstad 整合方式
 
-如果你有自己的 domain，可以在 Render 後台替這個 Web Service 加上 custom domain，然後照 Render 提示設定 DNS。
+此專案保留兩部分：
 
-### 注意事項
-
-- 不要把真正的 API key 寫進 `server-config.local.json` 後提交到 GitHub。
-- 你本地可繼續用 `server-config.local.json`，但線上環境應改用 Render 的環境變數。
-- 右側 Falstad 已經是本地靜態檔，會隨專案一起部署，不需要另外裝服務。
-
-## Falstad 是怎樣接進專案的
-
-這次我把 Falstad 分成兩部分放入專案，這樣比較實際，也比較容易維護。
-
-### 1. 可執行 runtime
+### 可執行 runtime
 
 放在：
 
@@ -161,25 +163,9 @@ https://your-app-name.onrender.com
 falstad/
 ```
 
-這裡使用的是 CircuitJS1 官方離線版中的：
+這是右側 iframe 真正使用的版本。
 
-```txt
-resources/app/war
-```
-
-原因是：
-
-- GitHub 原始碼 repo 內的 `war/` 只有頁面骨架
-- 真正可直接執行的編譯輸出，例如 `circuitjs1/circuitjs1.nocache.js`，是在離線版內
-- 這台機器目前沒有 Java / GWT 編譯環境，所以無法直接從 source repo 本地編譯出 runtime
-
-因此，右側 iframe 現在會直接使用本地：
-
-```txt
-falstad/circuitjs.html
-```
-
-### 2. GitHub 原始碼快照
+### GitHub 原始碼快照
 
 放在：
 
@@ -187,64 +173,74 @@ falstad/circuitjs.html
 vendor/circuitjs1-source/
 ```
 
-這裡保留的是 GitHub 開源原始碼，方便你：
+這份是方便研究 CircuitJS1 原始碼，不是目前頁面直接執行的 runtime。
 
-- 查看專案結構
-- 日後研究 CircuitJS1 原始碼
-- 之後若你安裝好 Java / GWT，再自行編譯更新 runtime
+## 目前已加入的穩定化措施
 
-## 為甚麼 source 和 runtime 要分開
+- 使用 `planner -> formatter` 雙階段生成
+- 使用 JSON schema 約束 Gemini 輸出
+- 若回應被截斷，會自動改用更精簡版本重試
+- 若回應不是標準 JSON，會做修復嘗試
+- 顯示 `Raw AI Output`，方便觀察模型真實輸出
+- 自動把 `falstad_code` 中的字面 `\\n` 還原成真正換行
 
-因為 CircuitJS1 的 GitHub repo 並不是「下載就能直接用」的純靜態網站。
+## 常見問題
 
-GitHub source 內的 `war/circuitjs.html` 會引用：
+### 1. `The AI response was not valid JSON`
 
-```txt
-circuitjs1/circuitjs1.nocache.js
-```
+先看 `Raw AI Output`：
 
-但這些編譯後的檔案不在原始碼 zip 內，而是在官方離線版的 `resources/app/war` 裡。
+- 如果是半截 JSON：通常是模型輸出被截斷
+- 如果有 markdown code fence：代表模型沒完全遵守 schema
+- 如果 `falstad_code` 有字面 `\\n`：新版前後端會自動還原
 
-所以目前最穩定的做法是：
+### 2. 右側 Falstad 沒顯示
 
-- `vendor/circuitjs1-source/` 保存 source
-- `falstad/` 放真正可運行的 build
+確認：
 
-## 目前已支援的功能
+- 網址是 `http://localhost:8080`
+- 不是直接雙擊 `index.html`
+- `falstad/circuitjs.html` 存在
 
-- 文字需求輸入
-- 圖片上載
-- 本地後端代理 Google Gemini API
-- Falstad 專用代碼輸出
-- 視覺化教學指引輸出
-- 一鍵複製結果
-- 一鍵把代碼載入右側 Falstad
-- 從右側 Falstad 匯出目前電路
+### 3. Render 改了 API key 但沒生效
 
-## 本地驗證建議
+修改完 Render `Environment` 後，請再：
 
-啟動後建議依序檢查：
+1. `Manual Deploy`
+2. `Deploy latest commit`
 
-1. 首頁能正常打開
-2. 右側 Falstad simulator 正常出現
-3. 點 `載入示例`
-4. 填入 API key 後按 `Generate`
-5. 確認左側兩個輸出框出現內容
-6. 按 `載入右側模擬器`
+## 關於 Raw AI Output
 
-## 之後可繼續升級的方向
+`Raw AI Output` 顯示的是模型實際給我們的可見輸出，不是模型的完整內部推理過程。
 
-1. 改成正式後端框架，例如 Node/Express 或 Rails
-2. 加入學生歷程與題庫
-3. 加入教師模式
-4. 支援多張變形電路圖批次生成
-5. 在後端加入輸出驗證，例如檢查座標是否全為 16 的倍數
+這樣設計的好處是：
+
+- 省 token
+- 減少暴露不必要的冗長內容
+- 更容易把結果穩定限制在 JSON / Falstad code / guide
+
+目前後端已採用這個提升穩定度的做法：
+
+1. 第一步讓模型先做較自由的草稿規劃
+2. 第二步再把草稿轉成嚴格 JSON
+
+這種做法通常比直接要求模型一次輸出最終 JSON 更穩定，也更容易兼顧推理品質與格式控制。
+
+## 之後可考慮的升級方向
+
+1. 加入後端快取，避免相同 prompt 重複花 token
+2. 加入生成紀錄與教師題庫
+3. 把 AI 生成拆成兩步：
+   - planner
+   - strict JSON formatter
+4. 加入 Falstad 代碼驗證器
+5. 加入學生操作紀錄
 
 ## 來源
 
-- CircuitJS1 GitHub 開源原始碼：
+- CircuitJS1 GitHub:
   - <https://github.com/sharpie7/circuitjs1>
-- Falstad 官方頁面：
+- Falstad 官方：
   - <https://www.falstad.com/circuit/about.html>
-- Google Gemini API：
+- Google Gemini API docs：
   - <https://ai.google.dev/gemini-api/docs>

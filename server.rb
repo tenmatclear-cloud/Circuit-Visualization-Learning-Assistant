@@ -12,6 +12,8 @@ CONFIG_PATH = ROOT.join("server-config.local.json")
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 MAX_OUTPUT_TOKENS = 6144
 COMPACT_MAX_OUTPUT_TOKENS = 4096
+PLANNER_MAX_OUTPUT_TOKENS = 2048
+PLANNER_COMPACT_MAX_OUTPUT_TOKENS = 1024
 CURL_RETRY_ATTEMPTS = 3
 
 SYSTEM_PROMPT = <<~PROMPT
@@ -61,20 +63,34 @@ def parse_data_url(data_url)
   }
 end
 
-def build_gemini_payload(prompt_text, image_data_url, compact: false)
-  prompt_body = [
-    SYSTEM_PROMPT,
-    "",
-    "請根據以下需求產生教學用 Falstad 內容。",
-    compact ? "請輸出更精簡的版本，每個欄位只保留教學必需內容。" : "請保持精簡，避免冗長說明。",
-    "",
-    "【使用者文字需求】",
-    prompt_text.to_s.empty? ? "使用者只上載了圖片，沒有提供文字說明。" : prompt_text
-  ].join("\n")
+def json_schema
+  {
+    "type" => "object",
+    "properties" => {
+      "analysis" => { "type" => "string" },
+      "falstad_code" => { "type" => "string" },
+      "teaching_guide" => { "type" => "string" }
+    },
+    "required" => ["analysis", "falstad_code", "teaching_guide"],
+    "propertyOrdering" => ["analysis", "falstad_code", "teaching_guide"]
+  }
+end
 
+def user_request_label(prompt_text)
+  prompt_text.to_s.empty? ? "使用者只上載了圖片，沒有提供文字說明。" : prompt_text
+end
+
+def build_request_parts(prompt_text, image_data_url, instruction_text)
   parts = [
     {
-      "text" => prompt_body
+      "text" => [
+        SYSTEM_PROMPT,
+        "",
+        instruction_text,
+        "",
+        "【使用者文字需求】",
+        user_request_label(prompt_text)
+      ].join("\n")
     }
   ]
 
@@ -87,28 +103,116 @@ def build_gemini_payload(prompt_text, image_data_url, compact: false)
     }
   end
 
+  parts
+end
+
+def thinking_config_for(model, level)
+  return nil unless model.to_s.start_with?("gemini-3")
+
+  normalized_level =
+    if model.to_s.include?("flash")
+      %w[minimal low medium high].include?(level) ? level : "high"
+    else
+      %w[low high].include?(level) ? level : "high"
+    end
+
+  {
+    "thinkingConfig" => {
+      "thinkingLevel" => normalized_level
+    }
+  }
+end
+
+def build_generation_config(model, max_tokens:, temperature:, response_mime_type: nil, response_schema: nil, thinking_level: nil)
+  config = {
+    "temperature" => temperature,
+    "maxOutputTokens" => max_tokens
+  }
+
+  config["responseMimeType"] = response_mime_type if response_mime_type
+  config["responseSchema"] = response_schema if response_schema
+
+  thinking_config = thinking_config_for(model, thinking_level)
+  config.merge!(thinking_config) if thinking_config
+
+  config
+end
+
+def build_planner_payload(prompt_text, image_data_url, model, compact: false)
+  instruction_text = [
+    "先進行隱藏規劃，暫時不要輸出最終 JSON。",
+    compact ? "請輸出精簡規劃。" : "請輸出完整但精簡的規劃。",
+    "請用純文字，分成四部分：",
+    "1. Topology",
+    "2. Layout Plan",
+    "3. Falstad Strategy",
+    "4. Teaching Focus",
+    "要點包括：串聯/並聯/短路判斷、元件與節點安排、16 倍數座標策略、學生觀察重點。",
+    "不要直接解題，不要使用 markdown code fence，不要輸出最終 JSON。"
+  ].join("\n")
+
   {
     "contents" => [
       {
         "role" => "user",
-        "parts" => parts
+        "parts" => build_request_parts(prompt_text, image_data_url, instruction_text)
       }
     ],
-    "generationConfig" => {
-      "responseMimeType" => "application/json",
-      "responseSchema" => {
-        "type" => "object",
-        "properties" => {
-          "analysis" => { "type" => "string" },
-          "falstad_code" => { "type" => "string" },
-          "teaching_guide" => { "type" => "string" }
-        },
-        "required" => ["analysis", "falstad_code", "teaching_guide"],
-        "propertyOrdering" => ["analysis", "falstad_code", "teaching_guide"]
+    "generationConfig" => build_generation_config(
+      model,
+      max_tokens: compact ? PLANNER_COMPACT_MAX_OUTPUT_TOKENS : PLANNER_MAX_OUTPUT_TOKENS,
+      temperature: 0.2,
+      thinking_level: "high"
+    )
+  }
+end
+
+def planner_content_for_history(data)
+  candidate = Array(data["candidates"]).find { |item| item.is_a?(Hash) && item["content"].is_a?(Hash) }
+  content = candidate && candidate["content"]
+  return nil unless content
+
+  {
+    "role" => content["role"] || "model",
+    "parts" => Array(content["parts"])
+  }
+end
+
+def build_formatter_payload(prompt_text, image_data_url, planner_content, model, compact: false)
+  formatter_follow_up = [
+    "請根據前一輪規劃與原始需求，現在輸出最終 JSON。",
+    "只可輸出符合 schema 的單一 JSON 物件。",
+    compact ? "請使用更精簡的最終版本。" : "請保持清晰與可直接教學使用。",
+    "analysis 要客觀、不要直接道破答案。",
+    "falstad_code 必須是可匯入 Falstad 的純文字代碼，並確保 X/Y 座標為 16 的倍數。",
+    "teaching_guide 只寫如何操作 Falstad 與如何引導學生觀察。",
+    "禁止輸出 markdown、註解、額外文字。"
+  ].join("\n")
+
+  {
+    "contents" => [
+      {
+        "role" => "user",
+        "parts" => build_request_parts(prompt_text, image_data_url, "請先理解題目與教學限制，這是原始需求。")
       },
-      "temperature" => 0.2,
-      "maxOutputTokens" => compact ? COMPACT_MAX_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS
-    }
+      planner_content,
+      {
+        "role" => "user",
+        "parts" => [
+          {
+            "text" => formatter_follow_up
+          }
+        ]
+      }
+    ],
+    "generationConfig" => build_generation_config(
+      model,
+      max_tokens: compact ? COMPACT_MAX_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS,
+      temperature: 0.1,
+      response_mime_type: "application/json",
+      response_schema: json_schema,
+      thinking_level: model.to_s.include?("flash") ? "medium" : "low"
+    )
   }
 end
 
@@ -131,21 +235,13 @@ def build_json_repair_payload(raw_text)
         ]
       }
     ],
-    "generationConfig" => {
-      "responseMimeType" => "application/json",
-      "responseSchema" => {
-        "type" => "object",
-        "properties" => {
-          "analysis" => { "type" => "string" },
-          "falstad_code" => { "type" => "string" },
-          "teaching_guide" => { "type" => "string" }
-        },
-        "required" => ["analysis", "falstad_code", "teaching_guide"],
-        "propertyOrdering" => ["analysis", "falstad_code", "teaching_guide"]
-      },
-      "temperature" => 0,
-      "maxOutputTokens" => 1024
-    }
+    "generationConfig" => build_generation_config(
+      nil,
+      max_tokens: 1024,
+      temperature: 0,
+      response_mime_type: "application/json",
+      response_schema: json_schema
+    )
   }
 end
 
@@ -169,21 +265,13 @@ def build_strict_json_repair_payload(raw_text)
         ]
       }
     ],
-    "generationConfig" => {
-      "responseMimeType" => "application/json",
-      "responseSchema" => {
-        "type" => "object",
-        "properties" => {
-          "analysis" => { "type" => "string" },
-          "falstad_code" => { "type" => "string" },
-          "teaching_guide" => { "type" => "string" }
-        },
-        "required" => ["analysis", "falstad_code", "teaching_guide"],
-        "propertyOrdering" => ["analysis", "falstad_code", "teaching_guide"]
-      },
-      "temperature" => 0,
-      "maxOutputTokens" => 768
-    }
+    "generationConfig" => build_generation_config(
+      nil,
+      max_tokens: 768,
+      temperature: 0,
+      response_mime_type: "application/json",
+      response_schema: json_schema
+    )
   }
 end
 
@@ -222,6 +310,17 @@ def response_truncated?(data)
   return true if finish_reasons.include?("MAX_TOKENS")
 
   truncated_json_output?(extract_output_text(data))
+end
+
+def combine_raw_outputs(planner_text, formatter_text)
+  sections = []
+  planner = planner_text.to_s.strip
+  formatter = formatter_text.to_s.strip
+
+  sections << "[Planner]\n#{planner}" unless planner.empty?
+  sections << "[Formatter]\n#{formatter}" unless formatter.empty?
+
+  sections.join("\n\n")
 end
 
 def normalize_model_text(text)
@@ -517,17 +616,43 @@ server.mount_proc "/api/generate" do |req, res|
     prompt_text = request_body["promptText"].to_s.strip
     image_data_url = request_body["imageDataUrl"].to_s.strip
     raw_output = ""
+    planner_raw_output = ""
 
     if prompt_text.empty? && image_data_url.empty?
       json_response(res, status: 400, body: { error: "請提供文字需求或圖片。" })
       next
     end
 
-    payloads = [
-      build_gemini_payload(prompt_text, image_data_url, compact: false),
-      build_gemini_payload(prompt_text, image_data_url, compact: true)
+    planner_payloads = [
+      build_planner_payload(prompt_text, image_data_url, config["google_model"], compact: false),
+      build_planner_payload(prompt_text, image_data_url, config["google_model"], compact: true)
     ]
-    status_code, upstream_data, model_used = perform_generation(payloads, api_key, config["google_model"])
+    planner_status_code, planner_data, model_used = perform_generation(planner_payloads, api_key, config["google_model"])
+
+    unless planner_status_code.between?(200, 299)
+      planner_error = planner_data.dig("error", "message") || JSON.generate(planner_data)
+      json_response(
+        res,
+        status: planner_status_code,
+        body: {
+          error: planner_error,
+          model_used: model_used,
+          raw_output: build_raw_output("", planner_data)
+        }
+      )
+      next
+    end
+
+    planner_text = extract_output_text(planner_data)
+    planner_raw_output = build_raw_output(planner_text, planner_data)
+    planner_content = planner_content_for_history(planner_data)
+    raise "AI 規劃階段沒有回傳可用內容，請再試一次。" unless planner_content && !planner_text.to_s.strip.empty?
+
+    formatter_payloads = [
+      build_formatter_payload(prompt_text, image_data_url, planner_content, model_used, compact: false),
+      build_formatter_payload(prompt_text, image_data_url, planner_content, model_used, compact: true)
+    ]
+    status_code, upstream_data, model_used = perform_generation(formatter_payloads, api_key, model_used)
 
     unless status_code.between?(200, 299)
       error_message = upstream_data.dig("error", "message") || JSON.generate(upstream_data)
@@ -537,14 +662,15 @@ server.mount_proc "/api/generate" do |req, res|
         body: {
           error: error_message,
           model_used: model_used,
-          raw_output: build_raw_output("", upstream_data)
+          raw_output: combine_raw_outputs(planner_raw_output, build_raw_output("", upstream_data))
         }
       )
       next
     end
 
     raw_text = extract_output_text(upstream_data)
-    raw_output = build_raw_output(raw_text, upstream_data)
+    formatter_raw_output = build_raw_output(raw_text, upstream_data)
+    raw_output = combine_raw_outputs(planner_raw_output, formatter_raw_output)
     raise "AI 沒有回傳文字內容，請再試一次。" if raw_text.to_s.strip.empty?
 
     begin
