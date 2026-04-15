@@ -1,0 +1,19 @@
+commit 107026e45387327705a36f503ab263928cdc9931
+Author: Paul Falstad <paul@falstad.com>
+Date:   Mon Mar 2 12:15:20 2026 -0800
+
+    fix dumping of 1-input gates
+
+diff --git a/src/com/lushprojects/circuitjs1/client/GateElm.java b/src/com/lushprojects/circuitjs1/client/GateElm.java
+index 6ca3ec3..75edab9 100644
+--- a/src/com/lushprojects/circuitjs1/client/GateElm.java
++++ b/src/com/lushprojects/circuitjs1/client/GateElm.java
+@@ -79,7 +79,7 @@ abstract class GateElm extends CircuitElm {
+ 	    super.dumpXml(doc, elem);
+ 	    if (highVoltage != 5)
+ 		XMLSerializer.dumpAttr(elem, "hi", highVoltage);
+-	    if (inputCount > 2)
++	    if (inputCount != 2)
+ 		XMLSerializer.dumpAttr(elem, "in", inputCount);
+ 	}
+ 
