@@ -41,7 +41,7 @@ PROMPT
 def load_config
   defaults = {
     "google_api_key" => ENV["GEMINI_API_KEY"] || ENV["GOOGLE_API_KEY"],
-    "google_model" => ENV.fetch("GOOGLE_MODEL", "gemini-2.5-flash-lite"),
+    "google_model" => ENV.fetch("GOOGLE_MODEL", "gemini-3-flash-preview"),
     "port" => ENV.fetch("PORT", "8080").to_i
   }
 
