@@ -343,6 +343,21 @@ function clearImage() {
   els.imagePreviewWrap.classList.add("hidden");
 }
 
+function normalizeGeneratedText(value, preserveNewlines = false) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const normalized = value
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\r\n/g, "\n")
+    .trim();
+
+  return preserveNewlines ? normalized : normalized.replace(/\n{3,}/g, "\n\n");
+}
+
 async function generateCircuitMaterials() {
   const promptText = els.userPrompt.value.trim();
 
@@ -380,8 +395,11 @@ async function generateCircuitMaterials() {
       throw error;
     }
 
-    els.falstadCode.value = payload.falstad_code || "";
-    els.teachingGuide.value = joinGuide(payload.analysis, payload.teaching_guide);
+    els.falstadCode.value = normalizeGeneratedText(payload.falstad_code, true);
+    els.teachingGuide.value = joinGuide(
+      normalizeGeneratedText(payload.analysis),
+      normalizeGeneratedText(payload.teaching_guide)
+    );
     setFeedback(t("feedback.generated"), false);
     setApiStatus("success");
   } catch (error) {
@@ -546,11 +564,13 @@ function setSimulatorOverlay(visible) {
 }
 
 function importIntoFalstad() {
-  const code = els.falstadCode.value.trim();
+  const code = normalizeGeneratedText(els.falstadCode.value, true);
   if (!code) {
     setFeedback(t("feedback.noFalstadCode"), true);
     return;
   }
+
+  els.falstadCode.value = code;
 
   if (!falstadSim || typeof falstadSim.importCircuit !== "function") {
     setFeedback(t("feedback.simulatorNotReady"), true);

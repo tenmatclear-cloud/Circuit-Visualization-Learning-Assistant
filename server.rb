@@ -297,6 +297,14 @@ def fallback_field_parse(text)
   parsed
 end
 
+def normalize_model_field(value, preserve_newlines: false)
+  normalized = value.to_s
+  normalized = normalized.gsub("\\r\\n", "\n").gsub("\\n", "\n").gsub("\\t", "\t")
+  normalized = normalized.gsub("\r\n", "\n")
+  normalized = normalized.strip
+  preserve_newlines ? normalized : normalized.gsub(/\n{3,}/, "\n\n")
+end
+
 def ensure_required_fields(parsed)
   return nil unless parsed.is_a?(Hash)
 
@@ -305,7 +313,7 @@ def ensure_required_fields(parsed)
     value = parsed[key] || parsed[key.to_sym]
     return nil unless value.is_a?(String) && !value.strip.empty?
 
-    normalized[key] = value.strip
+    normalized[key] = normalize_model_field(value, preserve_newlines: key == "falstad_code")
   end
 
   normalized
