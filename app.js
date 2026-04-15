@@ -23,7 +23,7 @@ const translations = {
     removeImageButton: "移除圖片",
     generateButton: "Generate",
     exampleButton: "載入示例",
-    helperText: "生成後，系統會把 Falstad 專用代碼與教學指引分別填到下方兩個輸出框。",
+    helperText: "生成後，系統會把 Falstad 專用代碼、教學指引與 Raw AI Output 填到下方輸出框。",
     step2Label: "Step 2",
     codeSectionTitle: "Falstad 專用代碼",
     copyCodeButton: "複製",
@@ -33,6 +33,10 @@ const translations = {
     guideSectionTitle: "Falstad 視覺化教學指引",
     copyGuideButton: "複製",
     teachingGuidePlaceholder: "AI 生成的觀察重點與操作建議會顯示在這裡。",
+    stepRawLabel: "Debug",
+    rawSectionTitle: "Raw AI Output",
+    copyRawButton: "複製",
+    rawOutputPlaceholder: "無論 AI 回傳什麼，原始文字都會顯示在這裡，方便排錯。",
     step4Label: "Step 4",
     simulatorTitle: "Falstad Circuit Simulation",
     overlayTitle: "本地 Falstad 尚未成功載入",
@@ -70,6 +74,7 @@ const translations = {
       noCopy: "目前沒有可複製的內容。",
       copiedCode: "已複製 Falstad 代碼",
       copiedGuide: "已複製教學指引",
+      copiedRaw: "已複製原始 AI 輸出",
       copyFailed: "複製失敗，請手動選取文字。",
       noFalstadCode: "目前沒有可匯入的 Falstad 代碼。",
       simulatorNotReady: "右側 Falstad 尚未完成連線，請先確認本地模擬器已載入。",
@@ -104,7 +109,7 @@ const translations = {
     generateButton: "Generate",
     exampleButton: "Load Example",
     helperText:
-      "After generation, the Falstad code and teaching guide will appear in the two output boxes below.",
+      "After generation, the Falstad code, teaching guide, and raw AI output will appear in the output boxes below.",
     step2Label: "Step 2",
     codeSectionTitle: "Falstad Code",
     copyCodeButton: "Copy",
@@ -114,6 +119,10 @@ const translations = {
     guideSectionTitle: "Falstad Teaching Guide",
     copyGuideButton: "Copy",
     teachingGuidePlaceholder: "AI-generated observation points and teaching suggestions will appear here.",
+    stepRawLabel: "Debug",
+    rawSectionTitle: "Raw AI Output",
+    copyRawButton: "Copy",
+    rawOutputPlaceholder: "Whatever the AI returns will appear here for debugging.",
     step4Label: "Step 4",
     simulatorTitle: "Falstad Circuit Simulation",
     overlayTitle: "Local Falstad Is Not Ready Yet",
@@ -151,6 +160,7 @@ const translations = {
       noCopy: "There is nothing to copy yet.",
       copiedCode: "Falstad code copied",
       copiedGuide: "Teaching guide copied",
+      copiedRaw: "Raw AI output copied",
       copyFailed: "Copy failed. Please select the text manually.",
       noFalstadCode: "There is no Falstad code to import yet.",
       simulatorNotReady: "The Falstad simulator is not connected yet. Please make sure the local simulator has loaded.",
@@ -200,6 +210,10 @@ const els = {
   guideSectionTitle: document.getElementById("guideSectionTitle"),
   teachingGuide: document.getElementById("teachingGuide"),
   copyGuideButton: document.getElementById("copyGuideButton"),
+  stepRawLabel: document.getElementById("stepRawLabel"),
+  rawSectionTitle: document.getElementById("rawSectionTitle"),
+  rawAiOutput: document.getElementById("rawAiOutput"),
+  copyRawButton: document.getElementById("copyRawButton"),
   step4Label: document.getElementById("step4Label"),
   simulatorTitle: document.getElementById("simulatorTitle"),
   falstadFrame: document.getElementById("falstadFrame"),
@@ -234,6 +248,7 @@ els.exampleButton.addEventListener("click", fillExample);
 els.generateButton.addEventListener("click", generateCircuitMaterials);
 els.copyCodeButton.addEventListener("click", () => copyText(els.falstadCode.value, t("feedback.copiedCode")));
 els.copyGuideButton.addEventListener("click", () => copyText(els.teachingGuide.value, t("feedback.copiedGuide")));
+els.copyRawButton.addEventListener("click", () => copyText(els.rawAiOutput.value, t("feedback.copiedRaw")));
 els.loadToFalstadButton.addEventListener("click", importIntoFalstad);
 els.refreshSimulatorButton.addEventListener("click", refreshSimulatorConnection);
 els.exportCodeButton.addEventListener("click", exportFromFalstad);
@@ -274,6 +289,10 @@ function renderLanguage() {
   els.guideSectionTitle.textContent = t("guideSectionTitle");
   els.copyGuideButton.textContent = t("copyGuideButton");
   els.teachingGuide.placeholder = t("teachingGuidePlaceholder");
+  els.stepRawLabel.textContent = t("stepRawLabel");
+  els.rawSectionTitle.textContent = t("rawSectionTitle");
+  els.copyRawButton.textContent = t("copyRawButton");
+  els.rawAiOutput.placeholder = t("rawOutputPlaceholder");
   els.step4Label.textContent = t("step4Label");
   els.simulatorTitle.textContent = t("simulatorTitle");
   els.overlayTitle.textContent = t("overlayTitle");
@@ -335,6 +354,9 @@ async function generateCircuitMaterials() {
 
   setLoadingState(true);
   setFeedback(t("feedback.generating"), false);
+  els.falstadCode.value = "";
+  els.teachingGuide.value = "";
+  els.rawAiOutput.value = "";
 
   try {
     const response = await fetch(APP_CONFIG.generateEndpoint, {
@@ -349,8 +371,13 @@ async function generateCircuitMaterials() {
     });
 
     const payload = await response.json().catch(() => ({}));
+    const rawOutput = payload.raw_output || "";
+    els.rawAiOutput.value = rawOutput;
+
     if (!response.ok) {
-      throw new Error(payload.error || `API request failed with status ${response.status}`);
+      const error = new Error(payload.error || `API request failed with status ${response.status}`);
+      error.rawOutput = rawOutput;
+      throw error;
     }
 
     els.falstadCode.value = payload.falstad_code || "";
@@ -359,6 +386,9 @@ async function generateCircuitMaterials() {
     setApiStatus("success");
   } catch (error) {
     console.error(error);
+    if (!els.rawAiOutput.value && error.rawOutput) {
+      els.rawAiOutput.value = error.rawOutput;
+    }
     setFeedback(`${t("feedback.generateFailed")}${translateBackendError(readableErrorMessage(error))}`, true);
     setApiStatus("error");
   } finally {

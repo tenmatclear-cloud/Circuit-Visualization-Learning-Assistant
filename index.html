@@ -114,6 +114,24 @@
                 placeholder="AI 生成的觀察重點與操作建議會顯示在這裡。"
               ></textarea>
             </section>
+
+            <section class="output-card">
+              <div class="output-header">
+                <div>
+                  <p class="panel-kicker" id="stepRawLabel">Debug</p>
+                  <h3 id="rawSectionTitle">Raw AI Output</h3>
+                </div>
+                <button class="ghost-button small" id="copyRawButton" type="button">
+                  複製
+                </button>
+              </div>
+              <textarea
+                id="rawAiOutput"
+                rows="12"
+                readonly
+                placeholder="無論 AI 回傳什麼，原始文字都會顯示在這裡，方便排錯。"
+              ></textarea>
+            </section>
           </div>
         </section>
 

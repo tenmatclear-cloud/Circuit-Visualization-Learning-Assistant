@@ -199,6 +199,16 @@ def extract_output_text(data)
   fragments.join("\n")
 end
 
+def build_raw_output(text, upstream_data = nil)
+  raw_text = text.to_s.strip
+  return raw_text unless raw_text.empty?
+  return "" unless upstream_data
+
+  JSON.pretty_generate(upstream_data)
+rescue StandardError
+  upstream_data.to_s
+end
+
 def normalize_model_text(text)
   text.to_s
     .gsub("\r\n", "\n")
@@ -478,6 +488,7 @@ server.mount_proc "/api/generate" do |req, res|
     request_body = JSON.parse(req.body)
     prompt_text = request_body["promptText"].to_s.strip
     image_data_url = request_body["imageDataUrl"].to_s.strip
+    raw_output = ""
 
     if prompt_text.empty? && image_data_url.empty?
       json_response(res, status: 400, body: { error: "請提供文字需求或圖片。" })
@@ -492,11 +503,20 @@ server.mount_proc "/api/generate" do |req, res|
 
     unless status_code.between?(200, 299)
       error_message = upstream_data.dig("error", "message") || JSON.generate(upstream_data)
-      json_response(res, status: status_code, body: { error: error_message, model_used: model_used })
+      json_response(
+        res,
+        status: status_code,
+        body: {
+          error: error_message,
+          model_used: model_used,
+          raw_output: build_raw_output("", upstream_data)
+        }
+      )
       next
     end
 
     raw_text = extract_output_text(upstream_data)
+    raw_output = build_raw_output(raw_text, upstream_data)
     raise "AI 沒有回傳文字內容，請再試一次。" if raw_text.to_s.strip.empty?
 
     begin
@@ -507,11 +527,26 @@ server.mount_proc "/api/generate" do |req, res|
     end
 
     parsed["model_used"] = model_used
+    parsed["raw_output"] = raw_output
     json_response(res, status: 200, body: parsed)
   rescue JSON::ParserError
-    json_response(res, status: 502, body: { error: "AI 回應不是有效 JSON，請再按一次 Generate。" })
+    json_response(
+      res,
+      status: 502,
+      body: {
+        error: "AI 回應不是有效 JSON，請再按一次 Generate。",
+        raw_output: raw_output
+      }
+    )
   rescue StandardError => e
-    json_response(res, status: 500, body: { error: e.message })
+    json_response(
+      res,
+      status: 500,
+      body: {
+        error: e.message,
+        raw_output: raw_output
+      }
+    )
   end
 end
 
