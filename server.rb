@@ -19,6 +19,17 @@ PLANNER_MINIMAL_MAX_OUTPUT_TOKENS = 512
 CURL_RETRY_ATTEMPTS = 3
 API_STATUS_RETRY_ATTEMPTS = 3
 
+class GenerationError < StandardError
+  attr_reader :raw_output, :status_code, :upstream_data
+
+  def initialize(message, raw_output: "", status_code: nil, upstream_data: nil)
+    super(message)
+    @raw_output = raw_output.to_s
+    @status_code = status_code
+    @upstream_data = upstream_data
+  end
+end
+
 SYSTEM_PROMPT = <<~PROMPT
   你是香港中學科學與物理的「電路視覺化教學輔助專家」。
   目標：把圖片或文字需求轉成 Falstad 專用代碼，並提供只聚焦於操作與觀察的教學指引。
@@ -804,7 +815,12 @@ def perform_generation(payloads, api_key, preferred_model)
         parsed = JSON.parse(body)
 
         if status_code.between?(200, 299) && response_truncated?(parsed)
-          last_error = StandardError.new(truncation_error_message)
+          last_error = GenerationError.new(
+            truncation_error_message,
+            raw_output: build_raw_output(extract_output_text(parsed), parsed),
+            status_code: status_code,
+            upstream_data: parsed
+          )
           break
         end
 
@@ -854,6 +870,13 @@ def generate_text_field(prompt_text, image_data_url, output_language, planner_co
   status_code, data, _model_used = perform_generation(payloads, api_key, model)
   raw_text = extract_output_text(data)
   [status_code, data, normalize_model_field(raw_text)]
+rescue GenerationError => e
+  raise GenerationError.new(
+    e.message,
+    raw_output: append_named_raw_output("", field_name.capitalize, e.raw_output),
+    status_code: e.status_code,
+    upstream_data: e.upstream_data
+  )
 end
 
 def generate_falstad_code(prompt_text, image_data_url, output_language, planner_content, planner_raw_output, api_key, model)
@@ -885,6 +908,13 @@ def generate_falstad_code(prompt_text, image_data_url, output_language, planner_
   end
 
   raise truncation_error_message
+rescue GenerationError => e
+  raise GenerationError.new(
+    e.message,
+    raw_output: append_named_raw_output(raw_output, "Falstad chunk (partial)", e.raw_output),
+    status_code: e.status_code,
+    upstream_data: e.upstream_data
+  )
 end
 
 def generate_image_digest(image_data_url, output_language, api_key, model)
@@ -892,6 +922,13 @@ def generate_image_digest(image_data_url, output_language, api_key, model)
   status_code, data, _model_used = perform_generation(payloads, api_key, model)
   raw_text = extract_output_text(data)
   [status_code, data, normalize_model_field(raw_text)]
+rescue GenerationError => e
+  raise GenerationError.new(
+    e.message,
+    raw_output: append_named_raw_output("", "Image Digest", e.raw_output),
+    status_code: e.status_code,
+    upstream_data: e.upstream_data
+  )
 end
 
 config = load_config
@@ -1101,6 +1138,15 @@ server.mount_proc "/api/generate" do |req, res|
       body: {
         error: "AI 回應不是有效 JSON，請再按一次 Generate。",
         raw_output: raw_output
+      }
+    )
+  rescue GenerationError => e
+    json_response(
+      res,
+      status: 500,
+      body: {
+        error: e.message,
+        raw_output: e.raw_output.to_s.empty? ? raw_output : e.raw_output
       }
     )
   rescue StandardError => e
