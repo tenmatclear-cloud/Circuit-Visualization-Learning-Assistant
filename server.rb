@@ -83,13 +83,33 @@ def user_request_label(prompt_text)
   prompt_text.to_s.empty? ? "使用者只上載了圖片，沒有提供文字說明。" : prompt_text
 end
 
-def build_request_parts(prompt_text, image_data_url, instruction_text)
+def normalized_output_language(output_language)
+  case output_language.to_s
+  when "en"
+    "English"
+  else
+    "繁體中文"
+  end
+end
+
+def output_language_instruction(output_language)
+  language_name = normalized_output_language(output_language)
+  [
+    "【輸出語言】",
+    "analysis 與 teaching_guide 必須使用#{language_name}輸出。",
+    "falstad_code 必須保持為 Falstad 專用代碼，不需翻譯。"
+  ].join("\n")
+end
+
+def build_request_parts(prompt_text, image_data_url, instruction_text, output_language)
   parts = [
     {
       "text" => [
         SYSTEM_PROMPT,
         "",
         instruction_text,
+        "",
+        output_language_instruction(output_language),
         "",
         "【使用者文字需求】",
         user_request_label(prompt_text)
@@ -141,7 +161,7 @@ def build_generation_config(model, max_tokens:, temperature:, response_mime_type
   config
 end
 
-def build_planner_payload(prompt_text, image_data_url, model, compact: false, minimal: false)
+def build_planner_payload(prompt_text, image_data_url, output_language, model, compact: false, minimal: false)
   instruction_text = [
     "先進行隱藏規劃，暫時不要輸出最終 JSON。",
     if minimal
@@ -169,7 +189,7 @@ def build_planner_payload(prompt_text, image_data_url, model, compact: false, mi
     "contents" => [
       {
         "role" => "user",
-        "parts" => build_request_parts(prompt_text, image_data_url, instruction_text)
+        "parts" => build_request_parts(prompt_text, image_data_url, instruction_text, output_language)
       }
     ],
     "generationConfig" => build_generation_config(
@@ -198,7 +218,7 @@ def planner_content_for_history(data)
   }
 end
 
-def build_text_field_payload(prompt_text, image_data_url, planner_content, model, field_name, compact: false)
+def build_text_field_payload(prompt_text, image_data_url, output_language, planner_content, model, field_name, compact: false)
   field_instruction =
     case field_name
     when "analysis"
@@ -224,7 +244,7 @@ def build_text_field_payload(prompt_text, image_data_url, planner_content, model
     "contents" => [
       {
         "role" => "user",
-        "parts" => build_request_parts(prompt_text, image_data_url, "請先理解題目與教學限制，這是原始需求。")
+        "parts" => build_request_parts(prompt_text, image_data_url, "請先理解題目與教學限制，這是原始需求。", output_language)
       },
       planner_content,
       {
@@ -245,7 +265,7 @@ def build_text_field_payload(prompt_text, image_data_url, planner_content, model
   }
 end
 
-def build_falstad_code_payload(prompt_text, image_data_url, planner_content, model, emitted_code: "", compact: false, minimal: false)
+def build_falstad_code_payload(prompt_text, image_data_url, output_language, planner_content, model, emitted_code: "", compact: false, minimal: false)
   code_instruction = [
     "現在只輸出 Falstad 專用代碼。",
     "只輸出純文字代碼，不要 JSON，不要 markdown，不要 code fence。",
@@ -275,7 +295,7 @@ def build_falstad_code_payload(prompt_text, image_data_url, planner_content, mod
     "contents" => [
       {
         "role" => "user",
-        "parts" => build_request_parts(prompt_text, image_data_url, "請先理解題目與教學限制，這是原始需求。")
+        "parts" => build_request_parts(prompt_text, image_data_url, "請先理解題目與教學限制，這是原始需求。", output_language)
       },
       planner_content,
       {
@@ -302,7 +322,7 @@ def build_falstad_code_payload(prompt_text, image_data_url, planner_content, mod
   }
 end
 
-def build_formatter_payload(prompt_text, image_data_url, planner_content, model, compact: false, minimal: false)
+def build_formatter_payload(prompt_text, image_data_url, output_language, planner_content, model, compact: false, minimal: false)
   formatter_follow_up = [
     "請根據前一輪規劃與原始需求，現在輸出最終 JSON。",
     "只可輸出符合 schema 的單一 JSON 物件。",
@@ -324,7 +344,7 @@ def build_formatter_payload(prompt_text, image_data_url, planner_content, model,
     "contents" => [
       {
         "role" => "user",
-        "parts" => build_request_parts(prompt_text, image_data_url, "請先理解題目與教學限制，這是原始需求。")
+        "parts" => build_request_parts(prompt_text, image_data_url, "請先理解題目與教學限制，這是原始需求。", output_language)
       },
       planner_content,
       {
@@ -772,26 +792,26 @@ rescue JSON::ParserError
   repaired_text
 end
 
-def generate_text_field(prompt_text, image_data_url, planner_content, api_key, model, field_name)
+def generate_text_field(prompt_text, image_data_url, output_language, planner_content, api_key, model, field_name)
   payloads = [
-    build_text_field_payload(prompt_text, image_data_url, planner_content, model, field_name, compact: false),
-    build_text_field_payload(prompt_text, image_data_url, planner_content, model, field_name, compact: true)
+    build_text_field_payload(prompt_text, image_data_url, output_language, planner_content, model, field_name, compact: false),
+    build_text_field_payload(prompt_text, image_data_url, output_language, planner_content, model, field_name, compact: true)
   ]
   status_code, data, _model_used = perform_generation(payloads, api_key, model)
   raw_text = extract_output_text(data)
   [status_code, data, normalize_model_field(raw_text)]
 end
 
-def generate_falstad_code(prompt_text, image_data_url, planner_content, planner_raw_output, api_key, model)
+def generate_falstad_code(prompt_text, image_data_url, output_language, planner_content, planner_raw_output, api_key, model)
   emitted_code = ""
   raw_output = planner_raw_output
   max_chunks = 6
 
   max_chunks.times do |index|
     payloads = [
-      build_falstad_code_payload(prompt_text, image_data_url, planner_content, model, emitted_code: emitted_code, compact: false),
-      build_falstad_code_payload(prompt_text, image_data_url, planner_content, model, emitted_code: emitted_code, compact: true),
-      build_falstad_code_payload(prompt_text, image_data_url, planner_content, model, emitted_code: emitted_code, minimal: true)
+      build_falstad_code_payload(prompt_text, image_data_url, output_language, planner_content, model, emitted_code: emitted_code, compact: false),
+      build_falstad_code_payload(prompt_text, image_data_url, output_language, planner_content, model, emitted_code: emitted_code, compact: true),
+      build_falstad_code_payload(prompt_text, image_data_url, output_language, planner_content, model, emitted_code: emitted_code, minimal: true)
     ]
 
     status_code, data, _model_used = perform_generation(payloads, api_key, model)
@@ -857,6 +877,7 @@ server.mount_proc "/api/generate" do |req, res|
     request_body = JSON.parse(req.body)
     prompt_text = request_body["promptText"].to_s.strip
     image_data_url = request_body["imageDataUrl"].to_s.strip
+    output_language = request_body["outputLanguage"].to_s.strip
     raw_output = ""
     planner_raw_output = ""
 
@@ -866,9 +887,9 @@ server.mount_proc "/api/generate" do |req, res|
     end
 
     planner_payloads = [
-      build_planner_payload(prompt_text, image_data_url, config["google_model"], compact: false),
-      build_planner_payload(prompt_text, image_data_url, config["google_model"], compact: true),
-      build_planner_payload(prompt_text, image_data_url, config["google_model"], minimal: true)
+      build_planner_payload(prompt_text, image_data_url, output_language, config["google_model"], compact: false),
+      build_planner_payload(prompt_text, image_data_url, output_language, config["google_model"], compact: true),
+      build_planner_payload(prompt_text, image_data_url, output_language, config["google_model"], minimal: true)
     ]
     planner_status_code, planner_data, model_used = perform_generation(planner_payloads, api_key, config["google_model"])
 
@@ -894,6 +915,7 @@ server.mount_proc "/api/generate" do |req, res|
     analysis_status_code, analysis_data, analysis_text = generate_text_field(
       prompt_text,
       image_data_url,
+      output_language,
       planner_content,
       api_key,
       model_used,
@@ -917,6 +939,7 @@ server.mount_proc "/api/generate" do |req, res|
     guide_status_code, guide_data, guide_text = generate_text_field(
       prompt_text,
       image_data_url,
+      output_language,
       planner_content,
       api_key,
       model_used,
@@ -944,6 +967,7 @@ server.mount_proc "/api/generate" do |req, res|
     status_code, upstream_data, falstad_code_text, raw_output = generate_falstad_code(
       prompt_text,
       image_data_url,
+      output_language,
       planner_content,
       append_named_raw_output(
         append_named_raw_output(planner_raw_output, "Analysis", analysis_text),

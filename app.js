@@ -382,6 +382,7 @@ async function generateCircuitMaterials() {
       body: JSON.stringify({
         promptText,
         imageDataUrl: uploadedImageDataUrl,
+        outputLanguage: currentLanguage,
       }),
     });
 
