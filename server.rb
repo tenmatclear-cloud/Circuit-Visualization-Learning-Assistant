@@ -96,6 +96,10 @@ def user_request_label(prompt_text, output_language)
   output_language.to_s == "en" ? "The user uploaded an image without additional text instructions." : "使用者只上載了圖片，沒有提供文字說明。"
 end
 
+def image_follow_up_request(output_language)
+  output_language.to_s == "en" ? "The circuit image has already been interpreted in the planner above. Continue from that planner output." : "電路圖片已在前一輪 planner 解析，請根據該 planner 結果繼續。"
+end
+
 def normalized_output_language(output_language)
   case output_language.to_s
   when "en"
@@ -223,10 +227,10 @@ end
 
 def build_image_digest_payload(image_data_url, output_language, model)
   instruction_text = [
-    "請根據這張電路圖圖片，輸出單行超短摘要。",
+    "請先把這張電路圖轉成簡短文字摘要，供後續 Falstad 生成使用。",
     "只輸出純文字，不要 JSON，不要 markdown，不要 code fence。",
-    "總長度盡量控制在 80 個字內。",
-    "格式：元件；拓撲；電池/開關/儀表。",
+    "請用最多 3 行，依次概括：元件、連接拓撲、特別條件（如電池、開關、短路、儀表）。",
+    "摘要要足夠完整，讓後續步驟不必再看圖片。",
     "不可解題，不可推導答案。"
   ].join("\n")
 
@@ -239,7 +243,7 @@ def build_image_digest_payload(image_data_url, output_language, model)
     ],
     "generationConfig" => build_generation_config(
       model,
-      max_tokens: 128,
+      max_tokens: 384,
       temperature: 0,
       thinking_level: "low"
     )
@@ -976,13 +980,31 @@ server.mount_proc "/api/generate" do |req, res|
     raw_output = ""
     planner_raw_output = ""
     effective_prompt_text = prompt_text
+    image_requested = !image_data_url.empty?
+    planner_prompt_text = prompt_text
+    planner_image_data_url = image_data_url
 
     if prompt_text.empty? && image_data_url.empty?
       json_response(res, status: 400, body: { error: "請提供文字需求或圖片。" })
       next
     end
 
-    if !image_data_url.empty?
+    planner_status_code = nil
+    planner_data = nil
+    model_used = config["google_model"]
+
+    begin
+      planner_payloads = [
+        build_planner_payload(planner_prompt_text, planner_image_data_url, output_language, config["google_model"], compact: false),
+        build_planner_payload(planner_prompt_text, planner_image_data_url, output_language, config["google_model"], compact: true),
+        build_planner_payload(planner_prompt_text, planner_image_data_url, output_language, config["google_model"], minimal: true)
+      ]
+      planner_status_code, planner_data, model_used = perform_generation(planner_payloads, api_key, config["google_model"])
+    rescue GenerationError => e
+      raise unless image_requested && e.message == truncation_error_message
+
+      raw_output = append_named_raw_output(raw_output, "Planner direct attempt", e.raw_output)
+
       digest_status_code, digest_data, digest_text = generate_image_digest(image_data_url, output_language, api_key, config["google_model"])
 
       unless digest_status_code.between?(200, 299)
@@ -993,29 +1015,27 @@ server.mount_proc "/api/generate" do |req, res|
           body: {
             error: digest_error,
             model_used: config["google_model"],
-            raw_output: build_raw_output("", digest_data)
+            raw_output: append_named_raw_output(raw_output, "Image Digest", build_raw_output("", digest_data))
           }
         )
         next
       end
 
       raw_output = append_named_raw_output(raw_output, "Image Digest", digest_text)
-      effective_prompt_text =
+      planner_prompt_text =
         if prompt_text.empty?
           digest_text
         else
           [prompt_text, "", "[Image digest]", digest_text].join("\n")
         end
-
-      image_data_url = ""
+      planner_image_data_url = ""
+      planner_payloads = [
+        build_planner_payload(planner_prompt_text, planner_image_data_url, output_language, config["google_model"], compact: false),
+        build_planner_payload(planner_prompt_text, planner_image_data_url, output_language, config["google_model"], compact: true),
+        build_planner_payload(planner_prompt_text, planner_image_data_url, output_language, config["google_model"], minimal: true)
+      ]
+      planner_status_code, planner_data, model_used = perform_generation(planner_payloads, api_key, config["google_model"])
     end
-
-    planner_payloads = [
-      build_planner_payload(effective_prompt_text, image_data_url, output_language, config["google_model"], compact: false),
-      build_planner_payload(effective_prompt_text, image_data_url, output_language, config["google_model"], compact: true),
-      build_planner_payload(effective_prompt_text, image_data_url, output_language, config["google_model"], minimal: true)
-    ]
-    planner_status_code, planner_data, model_used = perform_generation(planner_payloads, api_key, config["google_model"])
 
     unless planner_status_code.between?(200, 299)
       planner_error = planner_data.dig("error", "message") || JSON.generate(planner_data)
@@ -1035,6 +1055,8 @@ server.mount_proc "/api/generate" do |req, res|
     planner_raw_output = append_named_raw_output(raw_output, "Planner", build_raw_output(planner_text, planner_data))
     planner_content = planner_content_for_history(planner_data)
     raise "AI 規劃階段沒有回傳可用內容，請再試一次。" unless planner_content && !planner_text.to_s.strip.empty?
+    effective_prompt_text = prompt_text.empty? && image_requested ? image_follow_up_request(output_language) : prompt_text
+    image_data_url = ""
 
     analysis_status_code, analysis_data, analysis_text = generate_text_field(
       effective_prompt_text,

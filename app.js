@@ -1,6 +1,7 @@
 const APP_CONFIG = {
   generateEndpoint: "/api/generate",
   defaultLanguage: "zh-Hant",
+  uploadImageMaxDimension: 1280,
   simulatorSources: {
     "zh-Hant": "/circuit/circuitjs-zh-tw.html?whiteBackground=false",
     en: "/circuit/circuitjs.html?whiteBackground=false",
@@ -327,13 +328,22 @@ function handleImageUpload(event) {
     return;
   }
 
-  const reader = new FileReader();
-  reader.onload = () => {
-    uploadedImageDataUrl = typeof reader.result === "string" ? reader.result : "";
-    els.imagePreview.src = uploadedImageDataUrl;
-    els.imagePreviewWrap.classList.remove("hidden");
-  };
-  reader.readAsDataURL(file);
+  optimizeImageForUpload(file)
+    .catch(async (error) => {
+      console.warn("Image optimization failed, falling back to the original upload.", error);
+      return readFileAsDataUrl(file);
+    })
+    .then((dataUrl) => {
+      uploadedImageDataUrl = typeof dataUrl === "string" ? dataUrl : "";
+      els.imagePreview.src = uploadedImageDataUrl;
+      els.imagePreviewWrap.classList.remove("hidden");
+    })
+    .catch((error) => {
+      console.error(error);
+      clearImage();
+      setFeedback(t("feedback.needInput"), true);
+      setApiStatus("error");
+    });
 }
 
 function clearImage() {
@@ -356,6 +366,67 @@ function normalizeGeneratedText(value, preserveNewlines = false) {
     .trim();
 
   return preserveNewlines ? normalized : normalized.replace(/\n{3,}/g, "\n\n");
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(reader.error || new Error("Unable to read the selected image."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageElement(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Unable to decode the uploaded image."));
+    image.src = dataUrl;
+  });
+}
+
+function scaleImageSize(width, height, maxDimension) {
+  if (!width || !height || Math.max(width, height) <= maxDimension) {
+    return { width, height };
+  }
+
+  const scale = maxDimension / Math.max(width, height);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+function supportedUploadType(fileType) {
+  return ["image/png", "image/jpeg", "image/webp"].includes(fileType) ? fileType : "image/png";
+}
+
+async function optimizeImageForUpload(file) {
+  const originalDataUrl = await readFileAsDataUrl(file);
+  const image = await loadImageElement(originalDataUrl);
+  const naturalWidth = image.naturalWidth || image.width;
+  const naturalHeight = image.naturalHeight || image.height;
+  const { width, height } = scaleImageSize(naturalWidth, naturalHeight, APP_CONFIG.uploadImageMaxDimension);
+
+  if (width === naturalWidth && height === naturalHeight) {
+    return originalDataUrl;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return originalDataUrl;
+  }
+
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, 0, 0, width, height);
+
+  return canvas.toDataURL(supportedUploadType(file.type), 0.92);
 }
 
 async function generateCircuitMaterials() {
