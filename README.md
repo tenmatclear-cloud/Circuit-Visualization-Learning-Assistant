@@ -180,7 +180,7 @@ vendor/circuitjs1-source/
 - 使用 `planner -> formatter` 雙階段生成
 - 使用 JSON schema 約束 Gemini 輸出
 - 若 Gemini API 回傳 `503 high demand` / `UNAVAILABLE`，後端會自動重試
-- 若回應被截斷，會自動改用更精簡版本重試
+- 若回應被截斷，會自動改用 compact / minimal 版本重試
 - 若回應不是標準 JSON，會做修復嘗試
 - 顯示 `Raw AI Output`，方便觀察模型真實輸出
 - 自動把 `falstad_code` 中的字面 `\\n` 還原成真正換行
@@ -205,6 +205,14 @@ vendor/circuitjs1-source/
 1. 稍後再試
 2. 改用更簡單的 prompt
 3. 減少一次生成的電路數量
+
+### 1b. `AI 回應過長`
+
+如果系統已經自動改用 compact / minimal 版本仍未完成，建議先：
+
+1. 生成單一基礎電路
+2. 不要一次要求多個對比圖
+3. 暫時不要要求額外標示、註解或變形圖
 
 ### 2. 右側 Falstad 沒顯示
 

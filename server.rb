@@ -12,8 +12,10 @@ CONFIG_PATH = ROOT.join("server-config.local.json")
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 MAX_OUTPUT_TOKENS = 6144
 COMPACT_MAX_OUTPUT_TOKENS = 4096
+MINIMAL_MAX_OUTPUT_TOKENS = 2048
 PLANNER_MAX_OUTPUT_TOKENS = 2048
 PLANNER_COMPACT_MAX_OUTPUT_TOKENS = 1024
+PLANNER_MINIMAL_MAX_OUTPUT_TOKENS = 512
 CURL_RETRY_ATTEMPTS = 3
 API_STATUS_RETRY_ATTEMPTS = 3
 
@@ -139,19 +141,29 @@ def build_generation_config(model, max_tokens:, temperature:, response_mime_type
   config
 end
 
-def build_planner_payload(prompt_text, image_data_url, model, compact: false)
+def build_planner_payload(prompt_text, image_data_url, model, compact: false, minimal: false)
   instruction_text = [
     "先進行隱藏規劃，暫時不要輸出最終 JSON。",
-    compact ? "請輸出精簡規劃。" : "請輸出完整但精簡的規劃。",
-    "請用純文字，分成四部分：",
-    "1. Topology",
-    "2. Layout Plan",
-    "3. Falstad Strategy",
-    "4. Teaching Focus",
+    if minimal
+      "請輸出超精簡規劃，總長度盡量控制在 8 行內。"
+    elsif compact
+      "請輸出精簡規劃。"
+    else
+      "請輸出完整但精簡的規劃。"
+    end,
+    if minimal
+      "請只列出四行：Topology / Layout / Strategy / Focus。"
+    else
+      "請用純文字，分成四部分："
+    end,
+    ("1. Topology" unless minimal),
+    ("2. Layout Plan" unless minimal),
+    ("3. Falstad Strategy" unless minimal),
+    ("4. Teaching Focus" unless minimal),
     "要點包括：串聯/並聯/短路判斷、元件與節點安排、16 倍數座標策略、學生觀察重點。",
     "除非使用者明確要求，否則規劃中不要加入文字標籤、箭頭、指示線或指向電路某點的輔助圖形。",
     "不要直接解題，不要使用 markdown code fence，不要輸出最終 JSON。"
-  ].join("\n")
+  ].compact.join("\n")
 
   {
     "contents" => [
@@ -162,9 +174,15 @@ def build_planner_payload(prompt_text, image_data_url, model, compact: false)
     ],
     "generationConfig" => build_generation_config(
       model,
-      max_tokens: compact ? PLANNER_COMPACT_MAX_OUTPUT_TOKENS : PLANNER_MAX_OUTPUT_TOKENS,
+      max_tokens: if minimal
+                    PLANNER_MINIMAL_MAX_OUTPUT_TOKENS
+                  elsif compact
+                    PLANNER_COMPACT_MAX_OUTPUT_TOKENS
+                  else
+                    PLANNER_MAX_OUTPUT_TOKENS
+                  end,
       temperature: 0.2,
-      thinking_level: "high"
+      thinking_level: minimal ? "medium" : "high"
     )
   }
 end
@@ -180,11 +198,121 @@ def planner_content_for_history(data)
   }
 end
 
-def build_formatter_payload(prompt_text, image_data_url, planner_content, model, compact: false)
+def build_text_field_payload(prompt_text, image_data_url, planner_content, model, field_name, compact: false)
+  field_instruction =
+    case field_name
+    when "analysis"
+      [
+        "現在只輸出 analysis 內容。",
+        "只輸出純文字，不要 JSON，不要 markdown，不要 code fence。",
+        "內容要客觀描述電路拓撲、串聯/並聯/短路特徵與佈局概念。",
+        "不可直接道破答案。",
+        compact ? "請保持非常精簡。" : "請保持清晰、教學可用。"
+      ]
+    when "teaching_guide"
+      [
+        "現在只輸出 teaching_guide 內容。",
+        "只輸出純文字，不要 JSON，不要 markdown，不要 code fence。",
+        "只寫如何操作 Falstad 與如何引導學生觀察，不可解題。",
+        compact ? "請保持非常精簡。" : "請給 3 至 6 點具體操作與觀察建議。"
+      ]
+    else
+      raise "Unknown field: #{field_name}"
+    end
+
+  {
+    "contents" => [
+      {
+        "role" => "user",
+        "parts" => build_request_parts(prompt_text, image_data_url, "請先理解題目與教學限制，這是原始需求。")
+      },
+      planner_content,
+      {
+        "role" => "user",
+        "parts" => [
+          {
+            "text" => field_instruction.join("\n")
+          }
+        ]
+      }
+    ],
+    "generationConfig" => build_generation_config(
+      model,
+      max_tokens: compact ? 768 : 1536,
+      temperature: 0.1,
+      thinking_level: model.to_s.include?("flash") ? "medium" : "low"
+    )
+  }
+end
+
+def build_falstad_code_payload(prompt_text, image_data_url, planner_content, model, emitted_code: "", compact: false, minimal: false)
+  code_instruction = [
+    "現在只輸出 Falstad 專用代碼。",
+    "只輸出純文字代碼，不要 JSON，不要 markdown，不要 code fence。",
+    "除非使用者明確要求，否則不要加入任何 x 文字標示、箭頭、指示線或額外裝飾。",
+    "所有 X/Y 座標必須是 16 的倍數。",
+    if minimal
+      "請盡量多輸出完成的代碼行；如果仍未完成，最後一行輸出 [[CONTINUE]]；若已完成，最後一行輸出 [[END]]。"
+    elsif compact
+      "請使用較精簡的方式輸出代碼；如果仍未完成，最後一行輸出 [[CONTINUE]]；若已完成，最後一行輸出 [[END]]。"
+    else
+      "請完整輸出代碼；如果仍未完成，最後一行輸出 [[CONTINUE]]；若已完成，最後一行輸出 [[END]]。"
+    end
+  ]
+
+  if emitted_code.to_s.strip.empty?
+    continuation_instruction = "這是第一段代碼，請從第一行開始輸出。"
+  else
+    continuation_instruction = [
+      "以下是已輸出的代碼，請從下一個新行開始續寫。",
+      "不要重複、不要修改、不要重排任何已輸出的行。",
+      "【已輸出代碼】",
+      emitted_code
+    ].join("\n")
+  end
+
+  {
+    "contents" => [
+      {
+        "role" => "user",
+        "parts" => build_request_parts(prompt_text, image_data_url, "請先理解題目與教學限制，這是原始需求。")
+      },
+      planner_content,
+      {
+        "role" => "user",
+        "parts" => [
+          {
+            "text" => (code_instruction + [continuation_instruction]).join("\n")
+          }
+        ]
+      }
+    ],
+    "generationConfig" => build_generation_config(
+      model,
+      max_tokens: if minimal
+                    MINIMAL_MAX_OUTPUT_TOKENS
+                  elsif compact
+                    COMPACT_MAX_OUTPUT_TOKENS
+                  else
+                    MAX_OUTPUT_TOKENS
+                  end,
+      temperature: 0,
+      thinking_level: minimal ? "low" : (model.to_s.include?("flash") ? "medium" : "low")
+    )
+  }
+end
+
+def build_formatter_payload(prompt_text, image_data_url, planner_content, model, compact: false, minimal: false)
   formatter_follow_up = [
     "請根據前一輪規劃與原始需求，現在輸出最終 JSON。",
     "只可輸出符合 schema 的單一 JSON 物件。",
-    compact ? "請使用更精簡的最終版本。" : "請保持清晰與可直接教學使用。",
+    if minimal
+      "請輸出超精簡版本，analysis 與 teaching_guide 只保留最關鍵內容。"
+    elsif compact
+      "請使用更精簡的最終版本。"
+    else
+      "請保持清晰與可直接教學使用。"
+    end,
     "analysis 要客觀、不要直接道破答案。",
     "falstad_code 必須是可匯入 Falstad 的純文字代碼，並確保 X/Y 座標為 16 的倍數。",
     "除非使用者明確要求，否則不要加入任何 x 文字標示、箭頭、指示線或額外裝飾。",
@@ -210,11 +338,21 @@ def build_formatter_payload(prompt_text, image_data_url, planner_content, model,
     ],
     "generationConfig" => build_generation_config(
       model,
-      max_tokens: compact ? COMPACT_MAX_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS,
-      temperature: 0.1,
+      max_tokens: if minimal
+                    MINIMAL_MAX_OUTPUT_TOKENS
+                  elsif compact
+                    COMPACT_MAX_OUTPUT_TOKENS
+                  else
+                    MAX_OUTPUT_TOKENS
+                  end,
+      temperature: minimal ? 0 : 0.1,
       response_mime_type: "application/json",
       response_schema: json_schema,
-      thinking_level: model.to_s.include?("flash") ? "medium" : "low"
+      thinking_level: if minimal
+                        "low"
+                      else
+                        model.to_s.include?("flash") ? "medium" : "low"
+                      end
     )
   }
 end
@@ -324,6 +462,51 @@ def combine_raw_outputs(planner_text, formatter_text)
   sections << "[Formatter]\n#{formatter}" unless formatter.empty?
 
   sections.join("\n\n")
+end
+
+def append_named_raw_output(existing, label, content)
+  segment = content.to_s.strip
+  return existing if segment.empty?
+
+  combine_raw_outputs(existing, "[#{label}]\n#{segment}")
+end
+
+def strip_continuation_marker(text)
+  normalized = text.to_s.gsub(/\r\n/, "\n").strip
+  marker = if normalized.match?(/\[\[END\]\]\s*\z/)
+             :end
+           elsif normalized.match?(/\[\[CONTINUE\]\]\s*\z/)
+             :continue
+           else
+             :unknown
+           end
+
+  cleaned = normalized.sub(/\n?\s*\[\[(?:END|CONTINUE)\]\]\s*\z/, "").strip
+  [cleaned, marker]
+end
+
+def merge_code_chunks(existing, addition)
+  prior_lines = existing.to_s.split("\n")
+  new_lines = addition.to_s.split("\n")
+  return addition.to_s if prior_lines.empty?
+  return existing.to_s if new_lines.empty?
+
+  max_overlap = [prior_lines.length, new_lines.length].min
+  overlap = 0
+
+  max_overlap.downto(1) do |size|
+    if prior_lines.last(size) == new_lines.first(size)
+      overlap = size
+      break
+    end
+  end
+
+  merged_lines = prior_lines + new_lines.drop(overlap)
+  merged_lines.join("\n").strip
+end
+
+def truncation_error_message
+  "AI 回應過長，系統已自動改用更精簡版本重試，但仍未完成。請把需求拆細一點，或先生成較簡單的單一電路。"
 end
 
 def normalize_model_text(text)
@@ -548,7 +731,7 @@ def perform_generation(payloads, api_key, preferred_model)
         parsed = JSON.parse(body)
 
         if status_code.between?(200, 299) && response_truncated?(parsed)
-          last_error = StandardError.new("AI 輸出因長度限制被截斷，已自動改用更精簡版本重試。")
+          last_error = StandardError.new(truncation_error_message)
           break
         end
 
@@ -587,6 +770,46 @@ rescue JSON::ParserError
   raise JSON::ParserError, "Strict JSON repair returned empty text" if repaired_text.to_s.strip.empty?
 
   repaired_text
+end
+
+def generate_text_field(prompt_text, image_data_url, planner_content, api_key, model, field_name)
+  payloads = [
+    build_text_field_payload(prompt_text, image_data_url, planner_content, model, field_name, compact: false),
+    build_text_field_payload(prompt_text, image_data_url, planner_content, model, field_name, compact: true)
+  ]
+  status_code, data, _model_used = perform_generation(payloads, api_key, model)
+  raw_text = extract_output_text(data)
+  [status_code, data, normalize_model_field(raw_text)]
+end
+
+def generate_falstad_code(prompt_text, image_data_url, planner_content, planner_raw_output, api_key, model)
+  emitted_code = ""
+  raw_output = planner_raw_output
+  max_chunks = 6
+
+  max_chunks.times do |index|
+    payloads = [
+      build_falstad_code_payload(prompt_text, image_data_url, planner_content, model, emitted_code: emitted_code, compact: false),
+      build_falstad_code_payload(prompt_text, image_data_url, planner_content, model, emitted_code: emitted_code, compact: true),
+      build_falstad_code_payload(prompt_text, image_data_url, planner_content, model, emitted_code: emitted_code, minimal: true)
+    ]
+
+    status_code, data, _model_used = perform_generation(payloads, api_key, model)
+    return [status_code, data, emitted_code, append_named_raw_output(raw_output, "Falstad chunk #{index + 1}", build_raw_output("", data))] unless status_code.between?(200, 299)
+
+    chunk_text = normalize_model_field(extract_output_text(data), preserve_newlines: true)
+    raw_output = append_named_raw_output(raw_output, "Falstad chunk #{index + 1}", chunk_text)
+    cleaned_chunk, marker = strip_continuation_marker(chunk_text)
+    emitted_code = merge_code_chunks(emitted_code, cleaned_chunk)
+
+    return [200, data, emitted_code, raw_output] if marker == :end
+    next if marker == :continue && !cleaned_chunk.empty?
+
+    return [200, data, emitted_code, raw_output] if marker == :unknown && !cleaned_chunk.empty?
+    raise truncation_error_message
+  end
+
+  raise truncation_error_message
 end
 
 config = load_config
@@ -644,7 +867,8 @@ server.mount_proc "/api/generate" do |req, res|
 
     planner_payloads = [
       build_planner_payload(prompt_text, image_data_url, config["google_model"], compact: false),
-      build_planner_payload(prompt_text, image_data_url, config["google_model"], compact: true)
+      build_planner_payload(prompt_text, image_data_url, config["google_model"], compact: true),
+      build_planner_payload(prompt_text, image_data_url, config["google_model"], minimal: true)
     ]
     planner_status_code, planner_data, model_used = perform_generation(planner_payloads, api_key, config["google_model"])
 
@@ -667,11 +891,68 @@ server.mount_proc "/api/generate" do |req, res|
     planner_content = planner_content_for_history(planner_data)
     raise "AI 規劃階段沒有回傳可用內容，請再試一次。" unless planner_content && !planner_text.to_s.strip.empty?
 
-    formatter_payloads = [
-      build_formatter_payload(prompt_text, image_data_url, planner_content, model_used, compact: false),
-      build_formatter_payload(prompt_text, image_data_url, planner_content, model_used, compact: true)
-    ]
-    status_code, upstream_data, model_used = perform_generation(formatter_payloads, api_key, model_used)
+    analysis_status_code, analysis_data, analysis_text = generate_text_field(
+      prompt_text,
+      image_data_url,
+      planner_content,
+      api_key,
+      model_used,
+      "analysis"
+    )
+
+    unless analysis_status_code.between?(200, 299)
+      error_message = analysis_data.dig("error", "message") || JSON.generate(analysis_data)
+      json_response(
+        res,
+        status: analysis_status_code,
+        body: {
+          error: error_message,
+          model_used: model_used,
+          raw_output: append_named_raw_output(planner_raw_output, "Analysis", build_raw_output("", analysis_data))
+        }
+      )
+      next
+    end
+
+    guide_status_code, guide_data, guide_text = generate_text_field(
+      prompt_text,
+      image_data_url,
+      planner_content,
+      api_key,
+      model_used,
+      "teaching_guide"
+    )
+
+    unless guide_status_code.between?(200, 299)
+      error_message = guide_data.dig("error", "message") || JSON.generate(guide_data)
+      json_response(
+        res,
+        status: guide_status_code,
+        body: {
+          error: error_message,
+          model_used: model_used,
+          raw_output: append_named_raw_output(
+            append_named_raw_output(planner_raw_output, "Analysis", analysis_text),
+            "Teaching Guide",
+            build_raw_output("", guide_data)
+          )
+        }
+      )
+      next
+    end
+
+    status_code, upstream_data, falstad_code_text, raw_output = generate_falstad_code(
+      prompt_text,
+      image_data_url,
+      planner_content,
+      append_named_raw_output(
+        append_named_raw_output(planner_raw_output, "Analysis", analysis_text),
+        "Teaching Guide",
+        guide_text
+      ),
+      api_key,
+      model_used
+    )
 
     unless status_code.between?(200, 299)
       error_message = upstream_data.dig("error", "message") || JSON.generate(upstream_data)
@@ -681,23 +962,19 @@ server.mount_proc "/api/generate" do |req, res|
         body: {
           error: error_message,
           model_used: model_used,
-          raw_output: combine_raw_outputs(planner_raw_output, build_raw_output("", upstream_data))
+          raw_output: raw_output
         }
       )
       next
     end
 
-    raw_text = extract_output_text(upstream_data)
-    formatter_raw_output = build_raw_output(raw_text, upstream_data)
-    raw_output = combine_raw_outputs(planner_raw_output, formatter_raw_output)
-    raise "AI 沒有回傳文字內容，請再試一次。" if raw_text.to_s.strip.empty?
+    raise "AI 沒有回傳文字內容，請再試一次。" if falstad_code_text.to_s.strip.empty?
 
-    begin
-      parsed = parse_model_json(raw_text)
-    rescue JSON::ParserError
-      repaired_text = repair_generation_json(raw_text, api_key, model_used)
-      parsed = parse_model_json(repaired_text)
-    end
+    parsed = {
+      "analysis" => analysis_text,
+      "falstad_code" => normalize_model_field(falstad_code_text, preserve_newlines: true),
+      "teaching_guide" => guide_text
+    }
 
     parsed["model_used"] = model_used
     parsed["raw_output"] = raw_output

@@ -425,6 +425,8 @@ function translateBackendError(message) {
     "AI 沒有回傳文字內容，請再試一次。": "The AI returned no text. Please try again.",
     "AI 規劃階段沒有回傳可用內容，請再試一次。": "The AI planning step returned no usable content. Please try again.",
     "AI 回應不是有效 JSON，請再按一次 Generate。": "The AI response was not valid JSON. Please click Generate again.",
+    "AI 回應過長，系統已自動改用更精簡版本重試，但仍未完成。請把需求拆細一點，或先生成較簡單的單一電路。":
+      "The AI response was too long. The system already retried with a more compact version, but it still did not complete. Please simplify the request or generate a single simple circuit first.",
     "Google API 連線中斷。": "The Google API connection was interrupted.",
     "Google API 連線失敗。": "The Google API connection failed.",
   };
