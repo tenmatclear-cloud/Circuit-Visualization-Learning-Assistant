@@ -79,8 +79,10 @@ def json_schema
   }
 end
 
-def user_request_label(prompt_text)
-  prompt_text.to_s.empty? ? "使用者只上載了圖片，沒有提供文字說明。" : prompt_text
+def user_request_label(prompt_text, output_language)
+  return prompt_text unless prompt_text.to_s.empty?
+
+  output_language.to_s == "en" ? "The user uploaded an image without additional text instructions." : "使用者只上載了圖片，沒有提供文字說明。"
 end
 
 def normalized_output_language(output_language)
@@ -112,7 +114,7 @@ def build_request_parts(prompt_text, image_data_url, instruction_text, output_la
         output_language_instruction(output_language),
         "",
         "【使用者文字需求】",
-        user_request_label(prompt_text)
+        user_request_label(prompt_text, output_language)
       ].join("\n")
     }
   ]
@@ -793,9 +795,10 @@ rescue JSON::ParserError
 end
 
 def generate_text_field(prompt_text, image_data_url, output_language, planner_content, api_key, model, field_name)
+  downstream_image_data_url = ""
   payloads = [
-    build_text_field_payload(prompt_text, image_data_url, output_language, planner_content, model, field_name, compact: false),
-    build_text_field_payload(prompt_text, image_data_url, output_language, planner_content, model, field_name, compact: true)
+    build_text_field_payload(prompt_text, downstream_image_data_url, output_language, planner_content, model, field_name, compact: false),
+    build_text_field_payload(prompt_text, downstream_image_data_url, output_language, planner_content, model, field_name, compact: true)
   ]
   status_code, data, _model_used = perform_generation(payloads, api_key, model)
   raw_text = extract_output_text(data)
@@ -803,15 +806,16 @@ def generate_text_field(prompt_text, image_data_url, output_language, planner_co
 end
 
 def generate_falstad_code(prompt_text, image_data_url, output_language, planner_content, planner_raw_output, api_key, model)
+  downstream_image_data_url = ""
   emitted_code = ""
   raw_output = planner_raw_output
   max_chunks = 6
 
   max_chunks.times do |index|
     payloads = [
-      build_falstad_code_payload(prompt_text, image_data_url, output_language, planner_content, model, emitted_code: emitted_code, compact: false),
-      build_falstad_code_payload(prompt_text, image_data_url, output_language, planner_content, model, emitted_code: emitted_code, compact: true),
-      build_falstad_code_payload(prompt_text, image_data_url, output_language, planner_content, model, emitted_code: emitted_code, minimal: true)
+      build_falstad_code_payload(prompt_text, downstream_image_data_url, output_language, planner_content, model, emitted_code: emitted_code, compact: false),
+      build_falstad_code_payload(prompt_text, downstream_image_data_url, output_language, planner_content, model, emitted_code: emitted_code, compact: true),
+      build_falstad_code_payload(prompt_text, downstream_image_data_url, output_language, planner_content, model, emitted_code: emitted_code, minimal: true)
     ]
 
     status_code, data, _model_used = perform_generation(payloads, api_key, model)
