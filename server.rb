@@ -210,6 +210,35 @@ def build_planner_payload(prompt_text, image_data_url, output_language, model, c
   }
 end
 
+def build_image_digest_payload(image_data_url, output_language, model)
+  instruction_text = [
+    "請根據這張電路圖圖片，先輸出超精簡的文字摘要。",
+    "只輸出純文字，不要 JSON，不要 markdown，不要 code fence。",
+    "總長度盡量控制在 6 行內。",
+    "內容只需包括：",
+    "1. 主要元件與數值",
+    "2. 串聯 / 並聯 / 短路結構",
+    "3. 是否有電池、開關或儀表",
+    "4. 明顯的文字標示（若有）",
+    "不可解題，不可推導答案。"
+  ].join("\n")
+
+  {
+    "contents" => [
+      {
+        "role" => "user",
+        "parts" => build_request_parts("", image_data_url, instruction_text, output_language, include_system_prompt: false, include_request_label: false)
+      }
+    ],
+    "generationConfig" => build_generation_config(
+      model,
+      max_tokens: 384,
+      temperature: 0.1,
+      thinking_level: "medium"
+    )
+  }
+end
+
 def planner_content_for_history(data)
   candidate = Array(data["candidates"]).find { |item| item.is_a?(Hash) && item["content"].is_a?(Hash) }
   content = candidate && candidate["content"]
@@ -858,6 +887,13 @@ def generate_falstad_code(prompt_text, image_data_url, output_language, planner_
   raise truncation_error_message
 end
 
+def generate_image_digest(image_data_url, output_language, api_key, model)
+  payloads = [build_image_digest_payload(image_data_url, output_language, model)]
+  status_code, data, _model_used = perform_generation(payloads, api_key, model)
+  raw_text = extract_output_text(data)
+  [status_code, data, normalize_model_field(raw_text)]
+end
+
 config = load_config
 
 server = WEBrick::HTTPServer.new(
@@ -906,16 +942,45 @@ server.mount_proc "/api/generate" do |req, res|
     output_language = request_body["outputLanguage"].to_s.strip
     raw_output = ""
     planner_raw_output = ""
+    effective_prompt_text = prompt_text
 
     if prompt_text.empty? && image_data_url.empty?
       json_response(res, status: 400, body: { error: "請提供文字需求或圖片。" })
       next
     end
 
+    if !image_data_url.empty?
+      digest_status_code, digest_data, digest_text = generate_image_digest(image_data_url, output_language, api_key, config["google_model"])
+
+      unless digest_status_code.between?(200, 299)
+        digest_error = digest_data.dig("error", "message") || JSON.generate(digest_data)
+        json_response(
+          res,
+          status: digest_status_code,
+          body: {
+            error: digest_error,
+            model_used: config["google_model"],
+            raw_output: build_raw_output("", digest_data)
+          }
+        )
+        next
+      end
+
+      raw_output = append_named_raw_output(raw_output, "Image Digest", digest_text)
+      effective_prompt_text =
+        if prompt_text.empty?
+          digest_text
+        else
+          [prompt_text, "", "[Image digest]", digest_text].join("\n")
+        end
+
+      image_data_url = ""
+    end
+
     planner_payloads = [
-      build_planner_payload(prompt_text, image_data_url, output_language, config["google_model"], compact: false),
-      build_planner_payload(prompt_text, image_data_url, output_language, config["google_model"], compact: true),
-      build_planner_payload(prompt_text, image_data_url, output_language, config["google_model"], minimal: true)
+      build_planner_payload(effective_prompt_text, image_data_url, output_language, config["google_model"], compact: false),
+      build_planner_payload(effective_prompt_text, image_data_url, output_language, config["google_model"], compact: true),
+      build_planner_payload(effective_prompt_text, image_data_url, output_language, config["google_model"], minimal: true)
     ]
     planner_status_code, planner_data, model_used = perform_generation(planner_payloads, api_key, config["google_model"])
 
@@ -927,19 +992,19 @@ server.mount_proc "/api/generate" do |req, res|
         body: {
           error: planner_error,
           model_used: model_used,
-          raw_output: build_raw_output("", planner_data)
+          raw_output: append_named_raw_output(raw_output, "Planner", build_raw_output("", planner_data))
         }
       )
       next
     end
 
     planner_text = extract_output_text(planner_data)
-    planner_raw_output = build_raw_output(planner_text, planner_data)
+    planner_raw_output = append_named_raw_output(raw_output, "Planner", build_raw_output(planner_text, planner_data))
     planner_content = planner_content_for_history(planner_data)
     raise "AI 規劃階段沒有回傳可用內容，請再試一次。" unless planner_content && !planner_text.to_s.strip.empty?
 
     analysis_status_code, analysis_data, analysis_text = generate_text_field(
-      prompt_text,
+      effective_prompt_text,
       image_data_url,
       output_language,
       planner_content,
@@ -963,7 +1028,7 @@ server.mount_proc "/api/generate" do |req, res|
     end
 
     guide_status_code, guide_data, guide_text = generate_text_field(
-      prompt_text,
+      effective_prompt_text,
       image_data_url,
       output_language,
       planner_content,
@@ -991,7 +1056,7 @@ server.mount_proc "/api/generate" do |req, res|
     end
 
     status_code, upstream_data, falstad_code_text, raw_output = generate_falstad_code(
-      prompt_text,
+      effective_prompt_text,
       image_data_url,
       output_language,
       planner_content,
