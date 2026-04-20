@@ -103,19 +103,20 @@ def output_language_instruction(output_language)
   ].join("\n")
 end
 
-def build_request_parts(prompt_text, image_data_url, instruction_text, output_language)
+def build_request_parts(prompt_text, image_data_url, instruction_text, output_language, include_system_prompt: true, include_request_label: true)
+  text_sections = []
+  text_sections << SYSTEM_PROMPT if include_system_prompt
+  text_sections << instruction_text
+  text_sections << output_language_instruction(output_language)
+
+  if include_request_label
+    text_sections << "【使用者文字需求】"
+    text_sections << user_request_label(prompt_text, output_language)
+  end
+
   parts = [
     {
-      "text" => [
-        SYSTEM_PROMPT,
-        "",
-        instruction_text,
-        "",
-        output_language_instruction(output_language),
-        "",
-        "【使用者文字需求】",
-        user_request_label(prompt_text, output_language)
-      ].join("\n")
+      "text" => text_sections.join("\n\n")
     }
   ]
 
@@ -246,7 +247,14 @@ def build_text_field_payload(prompt_text, image_data_url, output_language, plann
     "contents" => [
       {
         "role" => "user",
-        "parts" => build_request_parts(prompt_text, image_data_url, "請先理解題目與教學限制，這是原始需求。", output_language)
+        "parts" => build_request_parts(
+          prompt_text,
+          image_data_url,
+          "請根據前一輪 planner 與原始需求，完成這個欄位。",
+          output_language,
+          include_system_prompt: false,
+          include_request_label: !prompt_text.to_s.empty?
+        )
       },
       planner_content,
       {
@@ -297,7 +305,14 @@ def build_falstad_code_payload(prompt_text, image_data_url, output_language, pla
     "contents" => [
       {
         "role" => "user",
-        "parts" => build_request_parts(prompt_text, image_data_url, "請先理解題目與教學限制，這是原始需求。", output_language)
+        "parts" => build_request_parts(
+          prompt_text,
+          image_data_url,
+          "請根據前一輪 planner 與原始需求，續寫 Falstad 專用代碼。",
+          output_language,
+          include_system_prompt: false,
+          include_request_label: !prompt_text.to_s.empty?
+        )
       },
       planner_content,
       {
@@ -346,7 +361,14 @@ def build_formatter_payload(prompt_text, image_data_url, output_language, planne
     "contents" => [
       {
         "role" => "user",
-        "parts" => build_request_parts(prompt_text, image_data_url, "請先理解題目與教學限制，這是原始需求。", output_language)
+        "parts" => build_request_parts(
+          prompt_text,
+          image_data_url,
+          "請根據前一輪 planner 與原始需求，現在輸出最終 JSON。",
+          output_language,
+          include_system_prompt: false,
+          include_request_label: !prompt_text.to_s.empty?
+        )
       },
       planner_content,
       {
