@@ -310,16 +310,38 @@ button:hover {
 .image-preview {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(29, 45, 53, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 250, 241, 0.92)),
+    var(--panel-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 .image-preview img {
-  max-height: 180px;
+  display: block;
+  max-height: 240px;
   width: 100%;
   object-fit: contain;
   border-radius: var(--radius-md);
   border: 1px solid var(--line);
   background: #fff;
+  padding: 14px;
+}
+
+#removeImageButton {
+  align-self: flex-end;
+  min-width: 140px;
+}
+
+.action-row {
+  flex-wrap: wrap;
+}
+
+.helper-text {
+  min-height: 3.3em;
 }
 
 .hidden {
