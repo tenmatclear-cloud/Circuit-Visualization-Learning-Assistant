@@ -15,6 +15,7 @@ COMPACT_MAX_OUTPUT_TOKENS = 4096
 PLANNER_MAX_OUTPUT_TOKENS = 2048
 PLANNER_COMPACT_MAX_OUTPUT_TOKENS = 1024
 CURL_RETRY_ATTEMPTS = 3
+API_STATUS_RETRY_ATTEMPTS = 3
 
 SYSTEM_PROMPT = <<~PROMPT
   你是香港中學科學與物理的「電路視覺化教學輔助專家」。
@@ -34,7 +35,7 @@ SYSTEM_PROMPT = <<~PROMPT
 
   欄位要求：
   - analysis：客觀描述電路拓撲；若是文字需求，簡述如何轉成電路佈局；指出串聯、並聯、短路或陷阱；不可直接道破答案。
-  - falstad_code：輸出可匯入 Falstad 的純文字代碼；所有 X/Y 座標必須是 16 的倍數；多個電路要整齊排列在同一畫布並用文字標籤；電池用 6V 或 9V；理想安培計視為導線加 A 標籤；理想伏特計視為 1e9 歐姆加 V 標籤；負載使用 r 或 181。
+  - falstad_code：輸出可匯入 Falstad 的純文字代碼；所有 X/Y 座標必須是 16 的倍數；多個電路要整齊排列在同一畫布；除非使用者明確要求，否則不要加入任何文字標籤、箭頭、指示線或額外裝飾；電池用 6V 或 9V；理想安培計視為導線加 A 標籤；理想伏特計視為 1e9 歐姆加 V 標籤；負載使用 r 或 181。
   - teaching_guide：只寫如何操作 Falstad 與引導學生觀察什麼；串聯要提示單一路徑與綠色電壓像下樓梯變暗；並聯要提示找分岔點與各分支頂部保持鮮綠；加入 3 至 6 點具體操作建議。
 
   請保持精簡、可直接教學使用。除了 JSON 之外，不要輸出任何文字。
@@ -148,6 +149,7 @@ def build_planner_payload(prompt_text, image_data_url, model, compact: false)
     "3. Falstad Strategy",
     "4. Teaching Focus",
     "要點包括：串聯/並聯/短路判斷、元件與節點安排、16 倍數座標策略、學生觀察重點。",
+    "除非使用者明確要求，否則規劃中不要加入文字標籤、箭頭、指示線或指向電路某點的輔助圖形。",
     "不要直接解題，不要使用 markdown code fence，不要輸出最終 JSON。"
   ].join("\n")
 
@@ -185,6 +187,7 @@ def build_formatter_payload(prompt_text, image_data_url, planner_content, model,
     compact ? "請使用更精簡的最終版本。" : "請保持清晰與可直接教學使用。",
     "analysis 要客觀、不要直接道破答案。",
     "falstad_code 必須是可匯入 Falstad 的純文字代碼，並確保 X/Y 座標為 16 的倍數。",
+    "除非使用者明確要求，否則不要加入任何 x 文字標示、箭頭、指示線或額外裝飾。",
     "teaching_guide 只寫如何操作 Falstad 與如何引導學生觀察。",
     "禁止輸出 markdown、註解、額外文字。"
   ].join("\n")
@@ -448,6 +451,13 @@ def transport_error?(error)
     error.is_a?(Timeout::Error)
 end
 
+def retryable_upstream_status?(status_code, data)
+  return false unless [429, 500, 503, 504].include?(status_code.to_i)
+
+  upstream_status = data.dig("error", "status").to_s
+  upstream_status.empty? || %w[UNAVAILABLE RESOURCE_EXHAUSTED INTERNAL DEADLINE_EXCEEDED].include?(upstream_status)
+end
+
 def gemini_endpoint_for(model)
   URI("#{GEMINI_API_BASE}/#{model}:generateContent")
 end
@@ -532,17 +542,26 @@ def perform_generation(payloads, api_key, preferred_model)
   last_error = nil
 
   payloads.each do |payload|
-    begin
-      status_code, body = request_gemini(payload, api_key, preferred_model)
-      parsed = JSON.parse(body)
-      if status_code.between?(200, 299) && response_truncated?(parsed)
-        last_error = StandardError.new("AI 輸出因長度限制被截斷，已自動改用更精簡版本重試。")
-        next
-      end
+    API_STATUS_RETRY_ATTEMPTS.times do |attempt|
+      begin
+        status_code, body = request_gemini(payload, api_key, preferred_model)
+        parsed = JSON.parse(body)
 
-      return [status_code, parsed, preferred_model]
-    rescue StandardError => e
-      last_error = e
+        if status_code.between?(200, 299) && response_truncated?(parsed)
+          last_error = StandardError.new("AI 輸出因長度限制被截斷，已自動改用更精簡版本重試。")
+          break
+        end
+
+        if retryable_upstream_status?(status_code, parsed) && attempt < API_STATUS_RETRY_ATTEMPTS - 1
+          sleep(attempt + 1)
+          next
+        end
+
+        return [status_code, parsed, preferred_model]
+      rescue StandardError => e
+        last_error = e
+        sleep(attempt + 1) if attempt < API_STATUS_RETRY_ATTEMPTS - 1
+      end
     end
   end
 

@@ -89,7 +89,7 @@ const translations = {
       teachingGuide: "【Falstad 視覺化教學指引】",
     },
     examplePrompt:
-      "請設計三個放在同一畫布上的電路：第一個是兩個電阻串聯，第二個是兩個電阻並聯，第三個是在第二個電路其中一個分支加入短路導線。請為每個圖加上文字標籤，方便學生比較。",
+      "請設計一個簡單電路：包含一個 9V 電池、一個開關，以及兩個串聯的電阻。佈局要清晰，方便學生觀察電流路徑與電壓變化。除非必要，請不要加入文字標籤。",
   },
   en: {
     heroEyebrow: "Series / Parallel Learning Studio",
@@ -175,7 +175,7 @@ const translations = {
       teachingGuide: "[Falstad Teaching Guide]",
     },
     examplePrompt:
-      "Please create three circuits on the same canvas: the first with two resistors in series, the second with two resistors in parallel, and the third with a short-circuit wire added across one branch of the second circuit. Add text labels for each diagram so students can compare them.",
+      "Please design a simple circuit with one 9V battery, one switch, and two resistors in series. Keep the layout clear so students can observe current flow and voltage changes. Avoid text labels unless they are truly necessary.",
   },
 };
 

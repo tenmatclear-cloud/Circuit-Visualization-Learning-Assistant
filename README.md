@@ -179,10 +179,12 @@ vendor/circuitjs1-source/
 
 - 使用 `planner -> formatter` 雙階段生成
 - 使用 JSON schema 約束 Gemini 輸出
+- 若 Gemini API 回傳 `503 high demand` / `UNAVAILABLE`，後端會自動重試
 - 若回應被截斷，會自動改用更精簡版本重試
 - 若回應不是標準 JSON，會做修復嘗試
 - 顯示 `Raw AI Output`，方便觀察模型真實輸出
 - 自動把 `falstad_code` 中的字面 `\\n` 還原成真正換行
+- 預設不加入文字標籤、箭頭或指示線，除非使用者明確要求
 
 ## 常見問題
 
@@ -193,6 +195,16 @@ vendor/circuitjs1-source/
 - 如果是半截 JSON：通常是模型輸出被截斷
 - 如果有 markdown code fence：代表模型沒完全遵守 schema
 - 如果 `falstad_code` 有字面 `\\n`：新版前後端會自動還原
+
+### 1a. `This model is currently experiencing high demand`
+
+這通常不是 token 限制，而是 Gemini 服務端暫時繁忙。
+
+新版後端會自動重試幾次。如果仍然失敗，可：
+
+1. 稍後再試
+2. 改用更簡單的 prompt
+3. 減少一次生成的電路數量
 
 ### 2. 右側 Falstad 沒顯示
 
