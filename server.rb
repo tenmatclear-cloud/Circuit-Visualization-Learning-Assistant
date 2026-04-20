@@ -223,14 +223,10 @@ end
 
 def build_image_digest_payload(image_data_url, output_language, model)
   instruction_text = [
-    "請根據這張電路圖圖片，先輸出超精簡的文字摘要。",
+    "請根據這張電路圖圖片，輸出單行超短摘要。",
     "只輸出純文字，不要 JSON，不要 markdown，不要 code fence。",
-    "總長度盡量控制在 6 行內。",
-    "內容只需包括：",
-    "1. 主要元件與數值",
-    "2. 串聯 / 並聯 / 短路結構",
-    "3. 是否有電池、開關或儀表",
-    "4. 明顯的文字標示（若有）",
+    "總長度盡量控制在 80 個字內。",
+    "格式：元件；拓撲；電池/開關/儀表。",
     "不可解題，不可推導答案。"
   ].join("\n")
 
@@ -243,9 +239,9 @@ def build_image_digest_payload(image_data_url, output_language, model)
     ],
     "generationConfig" => build_generation_config(
       model,
-      max_tokens: 384,
-      temperature: 0.1,
-      thinking_level: "medium"
+      max_tokens: 128,
+      temperature: 0,
+      thinking_level: "low"
     )
   }
 end
@@ -542,8 +538,8 @@ def combine_raw_outputs(planner_text, formatter_text)
   planner = planner_text.to_s.strip
   formatter = formatter_text.to_s.strip
 
-  sections << "[Planner]\n#{planner}" unless planner.empty?
-  sections << "[Formatter]\n#{formatter}" unless formatter.empty?
+  sections << planner unless planner.empty?
+  sections << formatter unless formatter.empty?
 
   sections.join("\n\n")
 end
@@ -552,7 +548,7 @@ def append_named_raw_output(existing, label, content)
   segment = content.to_s.strip
   return existing if segment.empty?
 
-  combine_raw_outputs(existing, "[#{label}]\n#{segment}")
+  [existing.to_s.strip, "[#{label}]\n#{segment}"].reject(&:empty?).join("\n\n")
 end
 
 def strip_continuation_marker(text)
