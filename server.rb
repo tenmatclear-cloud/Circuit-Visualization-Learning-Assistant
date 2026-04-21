@@ -10,12 +10,12 @@ require "net/http"
 ROOT = Pathname.new(__dir__)
 CONFIG_PATH = ROOT.join("server-config.local.json")
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-MAX_OUTPUT_TOKENS = 6144
-COMPACT_MAX_OUTPUT_TOKENS = 4096
-MINIMAL_MAX_OUTPUT_TOKENS = 2048
-PLANNER_MAX_OUTPUT_TOKENS = 2048
-PLANNER_COMPACT_MAX_OUTPUT_TOKENS = 1024
-PLANNER_MINIMAL_MAX_OUTPUT_TOKENS = 512
+MAX_OUTPUT_TOKENS = 65_536
+COMPACT_MAX_OUTPUT_TOKENS = 65_536
+MINIMAL_MAX_OUTPUT_TOKENS = 65_536
+PLANNER_MAX_OUTPUT_TOKENS = 65_536
+PLANNER_COMPACT_MAX_OUTPUT_TOKENS = 65_536
+PLANNER_MINIMAL_MAX_OUTPUT_TOKENS = 65_536
 CURL_RETRY_ATTEMPTS = 3
 API_STATUS_RETRY_ATTEMPTS = 3
 
@@ -931,6 +931,199 @@ rescue GenerationError => e
   )
 end
 
+def build_task_parts(prompt_text, image_data_url, instruction_text, output_language, include_request_label: true)
+  sections = [instruction_text]
+
+  if include_request_label
+    heading = output_language.to_s == "en" ? "User request" : "使用者需求"
+    sections << "【#{heading}】"
+    sections << user_request_label(prompt_text, output_language)
+  end
+
+  parts = [{ "text" => sections.join("\n\n") }]
+
+  if image_data_url && !image_data_url.empty?
+    inline_data = parse_data_url(image_data_url)
+    raise "圖片格式無法解析，請重新上載。" unless inline_data
+
+    parts << { "inline_data" => inline_data }
+  end
+
+  parts
+end
+
+def perform_generation_relaxed(payloads, api_key, preferred_model)
+  last_error = nil
+
+  payloads.each do |payload|
+    API_STATUS_RETRY_ATTEMPTS.times do |attempt|
+      begin
+        status_code, body = request_gemini(payload, api_key, preferred_model)
+        parsed = JSON.parse(body)
+
+        if retryable_upstream_status?(status_code, parsed) && attempt < API_STATUS_RETRY_ATTEMPTS - 1
+          sleep(attempt + 1)
+          next
+        end
+
+        return [status_code, parsed, preferred_model]
+      rescue StandardError => e
+        last_error = e
+        sleep(attempt + 1) if attempt < API_STATUS_RETRY_ATTEMPTS - 1
+      end
+    end
+  end
+
+  raise last_error if last_error
+  raise "Google API 請求失敗。"
+end
+
+def build_circuit_code_payload(prompt_text, image_data_url, output_language, model, emitted_code: "", compact: false)
+  instruction_lines = [
+    output_language.to_s == "en" ? "Your only task is to output Falstad circuit code that can be imported directly." : "你現在唯一的任務，是輸出可直接匯入 Falstad 的電路代碼。",
+    output_language.to_s == "en" ? "Output only plain Falstad code. No JSON, no markdown, no explanations." : "只輸出 Falstad 純文字代碼，不要 JSON，不要 markdown，不要解釋。",
+    output_language.to_s == "en" ? "Every X and Y coordinate must be a multiple of 16." : "所有 X 與 Y 座標都必須是 16 的倍數。",
+    output_language.to_s == "en" ? "Use legal Falstad elements only. Use 6V or 9V batteries when needed." : "只使用合法的 Falstad 元件；如需要電池，請用 6V 或 9V。",
+    output_language.to_s == "en" ? "Do not add x text labels, arrows, callouts, or decorative helper lines unless the user explicitly asks for them." : "除非使用者明確要求，否則不要加入 x 文字標示、箭頭、指示線或裝飾性輔助圖形。",
+    compact ? (output_language.to_s == "en" ? "Prefer the simplest valid layout that preserves the intended topology." : "請優先使用最簡潔、但仍保留原始拓撲的有效佈局。") : (output_language.to_s == "en" ? "Preserve the intended topology faithfully and keep the layout tidy." : "請忠實保留原有拓撲，並保持佈局整齊。"),
+    output_language.to_s == "en" ? "If the code is not finished, end the chunk with [[CONTINUE]]. If finished, end with [[END]]." : "如果代碼尚未完成，請在最後一行輸出 [[CONTINUE]]；若已完成，請在最後一行輸出 [[END]]。"
+  ]
+
+  if emitted_code.to_s.strip.empty?
+    continuation_text = output_language.to_s == "en" ? "This is the first chunk. Start from the first Falstad line." : "這是第一段代碼，請從第一行 Falstad 代碼開始輸出。"
+  else
+    continuation_text = [
+      output_language.to_s == "en" ? "Continue from the next new line after the already emitted code." : "請從已輸出代碼的下一個新行開始續寫。",
+      output_language.to_s == "en" ? "Do not repeat, revise, or reorder any line that has already been emitted." : "不要重複、不要修改、不要重排任何已輸出的行。",
+      output_language.to_s == "en" ? "Already emitted Falstad code:" : "已輸出的 Falstad 代碼：",
+      emitted_code
+    ].join("\n")
+  end
+
+  {
+    "contents" => [
+      {
+        "role" => "user",
+        "parts" => build_task_parts(prompt_text, image_data_url, (instruction_lines + [continuation_text]).join("\n"), output_language)
+      }
+    ],
+    "generationConfig" => build_generation_config(
+      model,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      temperature: 0,
+      thinking_level: compact ? "low" : "medium"
+    )
+  }
+end
+
+def clean_falstad_code(text)
+  cleaned_chunk, _marker = strip_continuation_marker(normalize_model_field(text, preserve_newlines: true))
+  cleaned_chunk
+end
+
+def generate_circuit_code(prompt_text, image_data_url, output_language, api_key, model)
+  emitted_code = ""
+  raw_output = ""
+  max_chunks = 8
+
+  max_chunks.times do |index|
+    payloads = [
+      build_circuit_code_payload(prompt_text, image_data_url, output_language, model, emitted_code: emitted_code, compact: false),
+      build_circuit_code_payload(prompt_text, image_data_url, output_language, model, emitted_code: emitted_code, compact: true)
+    ]
+
+    status_code, data, model_used = perform_generation_relaxed(payloads, api_key, model)
+    return [status_code, data, emitted_code, raw_output, model_used] unless status_code.between?(200, 299)
+
+    chunk_text = normalize_model_field(extract_output_text(data), preserve_newlines: true)
+    raw_output = append_named_raw_output(raw_output, "Circuit chunk #{index + 1}", build_raw_output(chunk_text, data))
+    cleaned_chunk, marker = strip_continuation_marker(chunk_text)
+    emitted_code = merge_code_chunks(emitted_code, cleaned_chunk)
+    finish_reasons = Array(data["candidates"]).filter_map { |candidate| candidate["finishReason"] }
+
+    return [200, data, clean_falstad_code(emitted_code), raw_output, model_used] if marker == :end
+    next if marker == :continue
+    next if finish_reasons.include?("MAX_TOKENS") && !cleaned_chunk.empty?
+    return [200, data, clean_falstad_code(emitted_code), raw_output, model_used] unless clean_falstad_code(emitted_code).empty?
+  end
+
+  raise GenerationError.new(truncation_error_message, raw_output: raw_output)
+end
+
+def build_guide_payload(prompt_text, output_language, falstad_code, model)
+  instruction_text = [
+    output_language.to_s == "en" ? "Your only task is to write a Falstad teaching guide." : "你現在唯一的任務，是輸出 Falstad 視覺化教學指引。",
+    output_language.to_s == "en" ? "Write the full response in English." : "整份回應必須使用繁體中文。",
+    output_language.to_s == "en" ? "Output plain text only. No JSON, no markdown code fences." : "只輸出純文字，不要 JSON，不要 markdown code fence。",
+    output_language.to_s == "en" ? "Do not solve the problem. Do not use formulas. Focus only on what to operate in Falstad and what students should observe." : "不可直接解題，不可使用公式；只聚焦於如何操作 Falstad，以及學生應觀察甚麼。",
+    output_language.to_s == "en" ? "Include 4 to 6 short numbered teaching moves." : "請提供 4 至 6 點精簡而具體的教學操作與觀察建議。",
+    output_language.to_s == "en" ? "If the circuit is series, remind the teacher to track the single path and the step-like voltage drop. If parallel, remind the teacher to look for branch points and equal top-side voltage." : "若屬串聯，請提醒教師引導學生追蹤單一路徑與階梯式電壓下降；若屬並聯，請提醒教師尋找分岔點與各分支頂部電壓保持一致。"
+  ].join("\n")
+
+  request_text = [
+    instruction_text,
+    "【#{output_language.to_s == "en" ? "User request" : "使用者需求"}】",
+    user_request_label(prompt_text, output_language),
+    "【Falstad code】",
+    falstad_code
+  ].join("\n\n")
+
+  {
+    "contents" => [
+      {
+        "role" => "user",
+        "parts" => [{ "text" => request_text }]
+      }
+    ],
+    "generationConfig" => build_generation_config(
+      model,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      temperature: 0.2,
+      thinking_level: "low"
+    )
+  }
+end
+
+def build_tutor_payload(prompt_text, output_language, falstad_code, model)
+  instruction_text = [
+    output_language.to_s == "en" ? "Your only task is to write a guided tutoring draft for the teacher." : "你現在唯一的任務，是輸出教師用的引導式解題教學草稿。",
+    output_language.to_s == "en" ? "Write the full response in English." : "整份回應必須使用繁體中文。",
+    output_language.to_s == "en" ? "Output plain text only. No JSON, no markdown code fences." : "只輸出純文字，不要 JSON，不要 markdown code fence。",
+    output_language.to_s == "en" ? "Do not reveal the final answer. Do not use formulas to solve the circuit." : "不可直接給出最終答案，不可用公式代替學生推理。",
+    output_language.to_s == "en" ? "Organize the response into four short sections: Lesson goal, Socratic questions, Common misconceptions, and Suggested Falstad interactions." : "請分成四個簡短部分：教學目標、引導式提問、常見迷思、建議的 Falstad 互動操作。",
+    output_language.to_s == "en" ? "The questions should help students infer the result by observing current dots, branch points, switch changes, and voltage colors." : "提問要協助學生透過觀察電流小點、分岔點、開關變化與電壓顏色來自行推理。"
+  ].join("\n")
+
+  request_text = [
+    instruction_text,
+    "【#{output_language.to_s == "en" ? "User request" : "使用者需求"}】",
+    user_request_label(prompt_text, output_language),
+    "【Falstad code】",
+    falstad_code
+  ].join("\n\n")
+
+  {
+    "contents" => [
+      {
+        "role" => "user",
+        "parts" => [{ "text" => request_text }]
+      }
+    ],
+    "generationConfig" => build_generation_config(
+      model,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      temperature: 0.3,
+      thinking_level: "medium"
+    )
+  }
+end
+
+def generate_plain_text_task(payload, api_key, model)
+  status_code, data, model_used = perform_generation([payload], api_key, model)
+  raw_text = normalize_model_field(extract_output_text(data), preserve_newlines: true)
+  [status_code, data, raw_text, model_used]
+end
+
 config = load_config
 
 server = WEBrick::HTTPServer.new(
@@ -974,181 +1167,136 @@ server.mount_proc "/api/generate" do |req, res|
 
   begin
     request_body = JSON.parse(req.body)
+    task = request_body["task"].to_s.strip
+    task = "circuit" if task.empty?
     prompt_text = request_body["promptText"].to_s.strip
     image_data_url = request_body["imageDataUrl"].to_s.strip
     output_language = request_body["outputLanguage"].to_s.strip
+    falstad_code_input = normalize_model_field(request_body["falstadCode"].to_s, preserve_newlines: true)
     raw_output = ""
-    planner_raw_output = ""
-    effective_prompt_text = prompt_text
-    image_requested = !image_data_url.empty?
-    planner_prompt_text = prompt_text
-    planner_image_data_url = image_data_url
+    case task
+    when "circuit"
+      if prompt_text.empty? && image_data_url.empty?
+        json_response(res, status: 400, body: { error: "請提供文字需求或圖片。" })
+        next
+      end
 
-    if prompt_text.empty? && image_data_url.empty?
-      json_response(res, status: 400, body: { error: "請提供文字需求或圖片。" })
-      next
-    end
+      status_code, upstream_data, falstad_code_text, raw_output, model_used = generate_circuit_code(
+        prompt_text,
+        image_data_url,
+        output_language,
+        api_key,
+        config["google_model"]
+      )
 
-    planner_status_code = nil
-    planner_data = nil
-    model_used = config["google_model"]
-
-    begin
-      planner_payloads = [
-        build_planner_payload(planner_prompt_text, planner_image_data_url, output_language, config["google_model"], compact: false),
-        build_planner_payload(planner_prompt_text, planner_image_data_url, output_language, config["google_model"], compact: true),
-        build_planner_payload(planner_prompt_text, planner_image_data_url, output_language, config["google_model"], minimal: true)
-      ]
-      planner_status_code, planner_data, model_used = perform_generation(planner_payloads, api_key, config["google_model"])
-    rescue GenerationError => e
-      raise unless image_requested && e.message == truncation_error_message
-
-      raw_output = append_named_raw_output(raw_output, "Planner direct attempt", e.raw_output)
-
-      digest_status_code, digest_data, digest_text = generate_image_digest(image_data_url, output_language, api_key, config["google_model"])
-
-      unless digest_status_code.between?(200, 299)
-        digest_error = digest_data.dig("error", "message") || JSON.generate(digest_data)
+      unless status_code.between?(200, 299)
+        error_message = upstream_data.dig("error", "message") || JSON.generate(upstream_data)
         json_response(
           res,
-          status: digest_status_code,
+          status: status_code,
           body: {
-            error: digest_error,
-            model_used: config["google_model"],
-            raw_output: append_named_raw_output(raw_output, "Image Digest", build_raw_output("", digest_data))
+            error: error_message,
+            model_used: model_used,
+            raw_output: raw_output
           }
         )
         next
       end
 
-      raw_output = append_named_raw_output(raw_output, "Image Digest", digest_text)
-      planner_prompt_text =
-        if prompt_text.empty?
-          digest_text
-        else
-          [prompt_text, "", "[Image digest]", digest_text].join("\n")
-        end
-      planner_image_data_url = ""
-      planner_payloads = [
-        build_planner_payload(planner_prompt_text, planner_image_data_url, output_language, config["google_model"], compact: false),
-        build_planner_payload(planner_prompt_text, planner_image_data_url, output_language, config["google_model"], compact: true),
-        build_planner_payload(planner_prompt_text, planner_image_data_url, output_language, config["google_model"], minimal: true)
-      ]
-      planner_status_code, planner_data, model_used = perform_generation(planner_payloads, api_key, config["google_model"])
-    end
+      falstad_code = normalize_model_field(falstad_code_text, preserve_newlines: true)
+      raise "AI 沒有回傳 Falstad 代碼，請再試一次。" if falstad_code.empty?
 
-    unless planner_status_code.between?(200, 299)
-      planner_error = planner_data.dig("error", "message") || JSON.generate(planner_data)
       json_response(
         res,
-        status: planner_status_code,
+        status: 200,
         body: {
-          error: planner_error,
-          model_used: model_used,
-          raw_output: append_named_raw_output(raw_output, "Planner", build_raw_output("", planner_data))
-        }
-      )
-      next
-    end
-
-    planner_text = extract_output_text(planner_data)
-    planner_raw_output = append_named_raw_output(raw_output, "Planner", build_raw_output(planner_text, planner_data))
-    planner_content = planner_content_for_history(planner_data)
-    raise "AI 規劃階段沒有回傳可用內容，請再試一次。" unless planner_content && !planner_text.to_s.strip.empty?
-    effective_prompt_text = prompt_text.empty? && image_requested ? image_follow_up_request(output_language) : prompt_text
-    image_data_url = ""
-
-    analysis_status_code, analysis_data, analysis_text = generate_text_field(
-      effective_prompt_text,
-      image_data_url,
-      output_language,
-      planner_content,
-      api_key,
-      model_used,
-      "analysis"
-    )
-
-    unless analysis_status_code.between?(200, 299)
-      error_message = analysis_data.dig("error", "message") || JSON.generate(analysis_data)
-      json_response(
-        res,
-        status: analysis_status_code,
-        body: {
-          error: error_message,
-          model_used: model_used,
-          raw_output: append_named_raw_output(planner_raw_output, "Analysis", build_raw_output("", analysis_data))
-        }
-      )
-      next
-    end
-
-    guide_status_code, guide_data, guide_text = generate_text_field(
-      effective_prompt_text,
-      image_data_url,
-      output_language,
-      planner_content,
-      api_key,
-      model_used,
-      "teaching_guide"
-    )
-
-    unless guide_status_code.between?(200, 299)
-      error_message = guide_data.dig("error", "message") || JSON.generate(guide_data)
-      json_response(
-        res,
-        status: guide_status_code,
-        body: {
-          error: error_message,
-          model_used: model_used,
-          raw_output: append_named_raw_output(
-            append_named_raw_output(planner_raw_output, "Analysis", analysis_text),
-            "Teaching Guide",
-            build_raw_output("", guide_data)
-          )
-        }
-      )
-      next
-    end
-
-    status_code, upstream_data, falstad_code_text, raw_output = generate_falstad_code(
-      effective_prompt_text,
-      image_data_url,
-      output_language,
-      planner_content,
-      append_named_raw_output(
-        append_named_raw_output(planner_raw_output, "Analysis", analysis_text),
-        "Teaching Guide",
-        guide_text
-      ),
-      api_key,
-      model_used
-    )
-
-    unless status_code.between?(200, 299)
-      error_message = upstream_data.dig("error", "message") || JSON.generate(upstream_data)
-      json_response(
-        res,
-        status: status_code,
-        body: {
-          error: error_message,
+          task: task,
+          falstad_code: falstad_code,
           model_used: model_used,
           raw_output: raw_output
         }
       )
-      next
+    when "guide"
+      if falstad_code_input.empty?
+        json_response(res, status: 400, body: { error: "請先生成或貼上 Falstad 代碼，再進行這一步。" })
+        next
+      end
+
+      status_code, guide_data, guide_text, model_used = generate_plain_text_task(
+        build_guide_payload(prompt_text, output_language, falstad_code_input, config["google_model"]),
+        api_key,
+        config["google_model"]
+      )
+      raw_output = append_named_raw_output("", "Guide", build_raw_output(guide_text, guide_data))
+
+      unless status_code.between?(200, 299)
+        error_message = guide_data.dig("error", "message") || JSON.generate(guide_data)
+        json_response(
+          res,
+          status: status_code,
+          body: {
+            error: error_message,
+            model_used: model_used,
+            raw_output: raw_output
+          }
+        )
+        next
+      end
+
+      raise "AI 沒有回傳教學指引，請再試一次。" if guide_text.empty?
+
+      json_response(
+        res,
+        status: 200,
+        body: {
+          task: task,
+          teaching_guide: guide_text,
+          model_used: model_used,
+          raw_output: raw_output
+        }
+      )
+    when "tutor"
+      if falstad_code_input.empty?
+        json_response(res, status: 400, body: { error: "請先生成或貼上 Falstad 代碼，再進行這一步。" })
+        next
+      end
+
+      status_code, tutor_data, tutor_text, model_used = generate_plain_text_task(
+        build_tutor_payload(prompt_text, output_language, falstad_code_input, config["google_model"]),
+        api_key,
+        config["google_model"]
+      )
+      raw_output = append_named_raw_output("", "Tutor", build_raw_output(tutor_text, tutor_data))
+
+      unless status_code.between?(200, 299)
+        error_message = tutor_data.dig("error", "message") || JSON.generate(tutor_data)
+        json_response(
+          res,
+          status: status_code,
+          body: {
+            error: error_message,
+            model_used: model_used,
+            raw_output: raw_output
+          }
+        )
+        next
+      end
+
+      raise "AI 沒有回傳解題教學內容，請再試一次。" if tutor_text.empty?
+
+      json_response(
+        res,
+        status: 200,
+        body: {
+          task: task,
+          tutor_response: tutor_text,
+          model_used: model_used,
+          raw_output: raw_output
+        }
+      )
+    else
+      json_response(res, status: 400, body: { error: "不支援的生成任務。" })
     end
-
-    raise "AI 沒有回傳文字內容，請再試一次。" if falstad_code_text.to_s.strip.empty?
-
-    parsed = {
-      "analysis" => analysis_text,
-      "falstad_code" => normalize_model_field(falstad_code_text, preserve_newlines: true),
-      "teaching_guide" => guide_text
-    }
-
-    parsed["model_used"] = model_used
-    parsed["raw_output"] = raw_output
-    json_response(res, status: 200, body: parsed)
   rescue JSON::ParserError
     json_response(
       res,

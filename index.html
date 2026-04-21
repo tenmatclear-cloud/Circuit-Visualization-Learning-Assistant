@@ -61,8 +61,14 @@
           </div>
 
           <div class="action-row">
-            <button class="primary-button" id="generateButton" type="button">
-              Generate
+            <button class="primary-button" id="generateCircuitButton" type="button">
+              Generate Circuit
+            </button>
+            <button class="ghost-button" id="generateGuideButton" type="button">
+              Generate Guide
+            </button>
+            <button class="ghost-button" id="generateTutorButton" type="button">
+              Generate Tutor
             </button>
             <button class="ghost-button" id="exampleButton" type="button">
               載入示例
@@ -117,6 +123,24 @@
             <section class="output-card">
               <div class="output-header">
                 <div>
+                  <p class="panel-kicker" id="step4Label">Step 4</p>
+                  <h3 id="tutorSectionTitle">引導式解題教學草稿</h3>
+                </div>
+                <button class="ghost-button small" id="copyTutorButton" type="button">
+                  複製
+                </button>
+              </div>
+              <textarea
+                id="tutorOutput"
+                rows="12"
+                readonly
+                placeholder="AI 生成的引導式提問與教學流程會顯示在這裡。"
+              ></textarea>
+            </section>
+
+            <section class="output-card">
+              <div class="output-header">
+                <div>
                   <p class="panel-kicker" id="stepRawLabel">Debug</p>
                   <h3 id="rawSectionTitle">Raw AI Output</h3>
                 </div>
@@ -137,7 +161,7 @@
         <section class="panel simulator-panel">
           <div class="panel-header">
             <div>
-              <p class="panel-kicker" id="step4Label">Step 4</p>
+              <p class="panel-kicker" id="step5Label">Step 5</p>
               <h2 id="simulatorTitle">Falstad Circuit Simulation</h2>
             </div>
             <span class="status-pill" id="simulatorStatus">等待載入</span>

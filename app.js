@@ -22,9 +22,11 @@ const translations = {
     promptPlaceholder: "例如：請設計一個由兩個電阻組成的串聯電路，並加入一個短路變形圖供比較。",
     imageLabel: "電路圖圖片（可選）",
     removeImageButton: "移除圖片",
-    generateButton: "Generate",
+    generateCircuitButton: "生成電路代碼",
+    generateGuideButton: "生成教學指引",
+    generateTutorButton: "生成解題教學",
     exampleButton: "載入示例",
-    helperText: "生成後，你可在 Step 2 直接修改 Falstad 專用代碼，再載入右側模擬器測試。",
+    helperText: "先用 Step 2 生成與修改 Falstad 專用代碼；代碼成功後，再分開生成教學指引與解題教學。",
     step2Label: "Step 2",
     codeSectionTitle: "Falstad 專用代碼",
     copyCodeButton: "複製",
@@ -34,11 +36,15 @@ const translations = {
     guideSectionTitle: "Falstad 視覺化教學指引",
     copyGuideButton: "複製",
     teachingGuidePlaceholder: "AI 生成的觀察重點與操作建議會顯示在這裡。",
+    step4Label: "Step 4",
+    tutorSectionTitle: "引導式解題教學草稿",
+    copyTutorButton: "複製",
+    tutorPlaceholder: "AI 生成的引導式提問、教學步驟與常見迷思會顯示在這裡。",
     stepRawLabel: "Debug",
     rawSectionTitle: "Raw AI Output",
     copyRawButton: "複製",
     rawOutputPlaceholder: "無論 AI 回傳什麼，原始文字都會顯示在這裡，方便排錯。",
-    step4Label: "Step 4",
+    step5Label: "Step 5",
     simulatorTitle: "Falstad Circuit Simulation",
     overlayTitle: "本地 Falstad 尚未成功載入",
     overlayBody:
@@ -51,9 +57,9 @@ const translations = {
     exportCodeButton: "從右側匯出目前電路",
     flowTitle: "學生建議流程",
     flowItem1: "在左側輸入電路需求或上載題目圖片。",
-    flowItem2: "按下 Generate 取得 Falstad 代碼與教學指引。",
-    flowItem3: "按 載入右側模擬器，或手動貼到 Falstad 匯入。",
-    flowItem4: "觀察黃色小圓點、綠色電壓深淺與分岔位置，進行推理。",
+    flowItem2: "先按「生成電路代碼」取得 Falstad 代碼，並視需要在 Step 2 直接修改。",
+    flowItem3: "按「載入右側模擬器」，確認電路可以成功匯入與模擬。",
+    flowItem4: "電路穩定後，再按「生成教學指引」或「生成解題教學」。",
     apiStatus: {
       idle: "尚未生成",
       loading: "生成中",
@@ -69,12 +75,18 @@ const translations = {
     },
     feedback: {
       needInput: "請先輸入文字需求，或上載一張電路圖。",
-      generating: "本地後端正在請求 AI，整理 Falstad 代碼與教學指引...",
-      generated: "生成完成，可直接修改 Step 2 代碼，或載入右側 Falstad 模擬器。",
+      needCode: "請先成功生成或貼上 Falstad 代碼，再進行這一步。",
+      generatingCircuit: "本地後端正在請求 AI 生成 Falstad 專用代碼...",
+      generatingGuide: "本地後端正在根據 Falstad 代碼生成教學指引...",
+      generatingTutor: "本地後端正在根據 Falstad 代碼生成引導式解題教學...",
+      generatedCircuit: "Falstad 專用代碼已生成，可直接修改 Step 2，或載入右側模擬器。",
+      generatedGuide: "教學指引已生成，可配合右側模擬器帶學生觀察。",
+      generatedTutor: "引導式解題教學已生成，可作為課堂提問流程草稿。",
       generateFailed: "生成失敗：",
       noCopy: "目前沒有可複製的內容。",
       copiedCode: "已複製 Falstad 代碼",
       copiedGuide: "已複製教學指引",
+      copiedTutor: "已複製解題教學草稿",
       copiedRaw: "已複製原始 AI 輸出",
       copyFailed: "複製失敗，請手動選取文字。",
       noFalstadCode: "目前沒有可匯入的 Falstad 代碼。",
@@ -84,10 +96,6 @@ const translations = {
       simulatorExportUnavailable: "目前未能從右側 Falstad 取得資料。",
       simulatorExported: "已把右側電路匯出到左側代碼框",
       simulatorExportFailed: "匯出失敗。",
-    },
-    guideHeaders: {
-      analysis: "【電路設計與拓撲結構分析】",
-      teachingGuide: "【Falstad 視覺化教學指引】",
     },
     examplePrompt:
       "請設計一個簡單電路：包含一個 9V 電池、一個開關，以及兩個串聯的電阻。佈局要清晰，方便學生觀察電流路徑與電壓變化。除非必要，請不要加入文字標籤。",
@@ -107,10 +115,12 @@ const translations = {
       "Example: Design a circuit with two resistors in series, and include one short-circuit variation for comparison.",
     imageLabel: "Circuit Image (Optional)",
     removeImageButton: "Remove image",
-    generateButton: "Generate",
+    generateCircuitButton: "Generate Circuit",
+    generateGuideButton: "Generate Guide",
+    generateTutorButton: "Generate Tutor",
     exampleButton: "Load Example",
     helperText:
-      "After generation, you can edit the Step 2 Falstad code directly before loading it into the simulator.",
+      "Generate and refine the Falstad code first. After the circuit is ready, generate the teaching guide and tutoring script separately.",
     step2Label: "Step 2",
     codeSectionTitle: "Falstad Code",
     copyCodeButton: "Copy",
@@ -120,11 +130,15 @@ const translations = {
     guideSectionTitle: "Falstad Teaching Guide",
     copyGuideButton: "Copy",
     teachingGuidePlaceholder: "AI-generated observation points and teaching suggestions will appear here.",
+    step4Label: "Step 4",
+    tutorSectionTitle: "Guided Tutoring Draft",
+    copyTutorButton: "Copy",
+    tutorPlaceholder: "AI-generated Socratic prompts, teaching moves, and common misconceptions will appear here.",
     stepRawLabel: "Debug",
     rawSectionTitle: "Raw AI Output",
     copyRawButton: "Copy",
     rawOutputPlaceholder: "Whatever the AI returns will appear here for debugging.",
-    step4Label: "Step 4",
+    step5Label: "Step 5",
     simulatorTitle: "Falstad Circuit Simulation",
     overlayTitle: "Local Falstad Is Not Ready Yet",
     overlayBody:
@@ -137,9 +151,9 @@ const translations = {
     exportCodeButton: "Export Current Circuit",
     flowTitle: "Suggested Student Flow",
     flowItem1: "Enter a circuit request or upload a question image on the left.",
-    flowItem2: "Click Generate to get Falstad code and the teaching guide.",
-    flowItem3: "Click Load Into Simulator, or paste the code manually into Falstad.",
-    flowItem4: "Observe the moving current dots, voltage colors, and branch points to reason it out.",
+    flowItem2: "Click Generate Circuit first, then refine the Falstad code directly in Step 2 if needed.",
+    flowItem3: "Load the circuit into the simulator and make sure it runs correctly.",
+    flowItem4: "After the circuit is stable, generate the teaching guide or tutoring draft separately.",
     apiStatus: {
       idle: "Not generated",
       loading: "Generating",
@@ -155,12 +169,18 @@ const translations = {
     },
     feedback: {
       needInput: "Please enter a text request or upload a circuit image first.",
-      generating: "The local backend is asking the AI to prepare Falstad code and a teaching guide...",
-      generated: "Generation completed. You can edit the Step 2 code directly or load it into the simulator.",
+      needCode: "Please generate or paste Falstad code first before running this step.",
+      generatingCircuit: "The local backend is asking the AI to generate Falstad code...",
+      generatingGuide: "The local backend is generating a teaching guide from the Falstad code...",
+      generatingTutor: "The local backend is generating a guided tutoring draft from the Falstad code...",
+      generatedCircuit: "Falstad code is ready. You can edit Step 2 directly or load it into the simulator.",
+      generatedGuide: "The teaching guide is ready for classroom observation and discussion.",
+      generatedTutor: "The guided tutoring draft is ready to use as a lesson flow.",
       generateFailed: "Generation failed: ",
       noCopy: "There is nothing to copy yet.",
       copiedCode: "Falstad code copied",
       copiedGuide: "Teaching guide copied",
+      copiedTutor: "Tutoring draft copied",
       copiedRaw: "Raw AI output copied",
       copyFailed: "Copy failed. Please select the text manually.",
       noFalstadCode: "There is no Falstad code to import yet.",
@@ -170,10 +190,6 @@ const translations = {
       simulatorExportUnavailable: "Unable to read data from the Falstad simulator right now.",
       simulatorExported: "The current circuit has been exported to the code box.",
       simulatorExportFailed: "Export failed.",
-    },
-    guideHeaders: {
-      analysis: "[Circuit Topology Analysis]",
-      teachingGuide: "[Falstad Teaching Guide]",
     },
     examplePrompt:
       "Please design a simple circuit with one 9V battery, one switch, and two resistors in series. Keep the layout clear so students can observe current flow and voltage changes. Avoid text labels unless they are truly necessary.",
@@ -198,7 +214,9 @@ const els = {
   imagePreviewWrap: document.getElementById("imagePreviewWrap"),
   imagePreview: document.getElementById("imagePreview"),
   removeImageButton: document.getElementById("removeImageButton"),
-  generateButton: document.getElementById("generateButton"),
+  generateCircuitButton: document.getElementById("generateCircuitButton"),
+  generateGuideButton: document.getElementById("generateGuideButton"),
+  generateTutorButton: document.getElementById("generateTutorButton"),
   exampleButton: document.getElementById("exampleButton"),
   feedbackText: document.getElementById("feedbackText"),
   apiStatus: document.getElementById("apiStatus"),
@@ -211,11 +229,15 @@ const els = {
   guideSectionTitle: document.getElementById("guideSectionTitle"),
   teachingGuide: document.getElementById("teachingGuide"),
   copyGuideButton: document.getElementById("copyGuideButton"),
+  step4Label: document.getElementById("step4Label"),
+  tutorSectionTitle: document.getElementById("tutorSectionTitle"),
+  tutorOutput: document.getElementById("tutorOutput"),
+  copyTutorButton: document.getElementById("copyTutorButton"),
   stepRawLabel: document.getElementById("stepRawLabel"),
   rawSectionTitle: document.getElementById("rawSectionTitle"),
   rawAiOutput: document.getElementById("rawAiOutput"),
   copyRawButton: document.getElementById("copyRawButton"),
-  step4Label: document.getElementById("step4Label"),
+  step5Label: document.getElementById("step5Label"),
   simulatorTitle: document.getElementById("simulatorTitle"),
   falstadFrame: document.getElementById("falstadFrame"),
   simulatorStatus: document.getElementById("simulatorStatus"),
@@ -240,15 +262,19 @@ let uploadedImageDataUrl = "";
 let falstadSim = null;
 let simulatorPollTimer = null;
 let currentFeedbackKey = "helperText";
+let currentLoadingTask = null;
 
 els.langZhButton.addEventListener("click", () => setLanguage("zh-Hant"));
 els.langEnButton.addEventListener("click", () => setLanguage("en"));
 els.imageInput.addEventListener("change", handleImageUpload);
 els.removeImageButton.addEventListener("click", clearImage);
 els.exampleButton.addEventListener("click", fillExample);
-els.generateButton.addEventListener("click", generateCircuitMaterials);
+els.generateCircuitButton.addEventListener("click", () => runGenerationTask("circuit"));
+els.generateGuideButton.addEventListener("click", () => runGenerationTask("guide"));
+els.generateTutorButton.addEventListener("click", () => runGenerationTask("tutor"));
 els.copyCodeButton.addEventListener("click", () => copyText(els.falstadCode.value, t("feedback.copiedCode")));
 els.copyGuideButton.addEventListener("click", () => copyText(els.teachingGuide.value, t("feedback.copiedGuide")));
+els.copyTutorButton.addEventListener("click", () => copyText(els.tutorOutput.value, t("feedback.copiedTutor")));
 els.copyRawButton.addEventListener("click", () => copyText(els.rawAiOutput.value, t("feedback.copiedRaw")));
 els.loadToFalstadButton.addEventListener("click", importIntoFalstad);
 els.refreshSimulatorButton.addEventListener("click", refreshSimulatorConnection);
@@ -279,7 +305,7 @@ function renderLanguage() {
   els.userPrompt.placeholder = t("promptPlaceholder");
   els.imageLabel.textContent = t("imageLabel");
   els.removeImageButton.textContent = t("removeImageButton");
-  els.generateButton.textContent = t("generateButton");
+  refreshActionButtons();
   els.exampleButton.textContent = t("exampleButton");
   els.step2Label.textContent = t("step2Label");
   els.codeSectionTitle.textContent = t("codeSectionTitle");
@@ -290,11 +316,15 @@ function renderLanguage() {
   els.guideSectionTitle.textContent = t("guideSectionTitle");
   els.copyGuideButton.textContent = t("copyGuideButton");
   els.teachingGuide.placeholder = t("teachingGuidePlaceholder");
+  els.step4Label.textContent = t("step4Label");
+  els.tutorSectionTitle.textContent = t("tutorSectionTitle");
+  els.copyTutorButton.textContent = t("copyTutorButton");
+  els.tutorOutput.placeholder = t("tutorPlaceholder");
   els.stepRawLabel.textContent = t("stepRawLabel");
   els.rawSectionTitle.textContent = t("rawSectionTitle");
   els.copyRawButton.textContent = t("copyRawButton");
   els.rawAiOutput.placeholder = t("rawOutputPlaceholder");
-  els.step4Label.textContent = t("step4Label");
+  els.step5Label.textContent = t("step5Label");
   els.simulatorTitle.textContent = t("simulatorTitle");
   els.overlayTitle.textContent = t("overlayTitle");
   els.overlayBody.textContent = t("overlayBody");
@@ -429,20 +459,39 @@ async function optimizeImageForUpload(file) {
   return canvas.toDataURL(supportedUploadType(file.type), 0.92);
 }
 
-async function generateCircuitMaterials() {
-  const promptText = els.userPrompt.value.trim();
+function clearTaskOutputs(task) {
+  els.rawAiOutput.value = "";
 
-  if (!promptText && !uploadedImageDataUrl) {
+  if (task === "circuit") {
+    els.falstadCode.value = "";
+    els.teachingGuide.value = "";
+    els.tutorOutput.value = "";
+  } else if (task === "guide") {
+    els.teachingGuide.value = "";
+  } else if (task === "tutor") {
+    els.tutorOutput.value = "";
+  }
+}
+
+async function runGenerationTask(task) {
+  const promptText = els.userPrompt.value.trim();
+  const falstadCode = normalizeGeneratedText(els.falstadCode.value, true);
+
+  if (task === "circuit" && !promptText && !uploadedImageDataUrl) {
     setFeedback(t("feedback.needInput"), true);
     setApiStatus("error");
     return;
   }
 
-  setLoadingState(true);
-  setFeedback(t("feedback.generating"), false);
-  els.falstadCode.value = "";
-  els.teachingGuide.value = "";
-  els.rawAiOutput.value = "";
+  if ((task === "guide" || task === "tutor") && !falstadCode) {
+    setFeedback(t("feedback.needCode"), true);
+    setApiStatus("error");
+    return;
+  }
+
+  setLoadingState(task, true);
+  setFeedback(t(`feedback.generating${capitalizeTask(task)}`), false);
+  clearTaskOutputs(task);
 
   try {
     const response = await fetch(APP_CONFIG.generateEndpoint, {
@@ -451,9 +500,11 @@ async function generateCircuitMaterials() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        task,
         promptText,
         imageDataUrl: uploadedImageDataUrl,
         outputLanguage: currentLanguage,
+        falstadCode,
       }),
     });
 
@@ -467,12 +518,17 @@ async function generateCircuitMaterials() {
       throw error;
     }
 
-    els.falstadCode.value = normalizeGeneratedText(payload.falstad_code, true);
-    els.teachingGuide.value = joinGuide(
-      normalizeGeneratedText(payload.analysis),
-      normalizeGeneratedText(payload.teaching_guide)
-    );
-    setFeedback(t("feedback.generated"), false);
+    if (task === "circuit") {
+      els.falstadCode.value = normalizeGeneratedText(payload.falstad_code, true);
+      els.teachingGuide.value = "";
+      els.tutorOutput.value = "";
+    } else if (task === "guide") {
+      els.teachingGuide.value = normalizeGeneratedText(payload.teaching_guide || payload.guide, true);
+    } else if (task === "tutor") {
+      els.tutorOutput.value = normalizeGeneratedText(payload.tutor_response || payload.tutor_output, true);
+    }
+
+    setFeedback(t(`feedback.generated${capitalizeTask(task)}`), false);
     setApiStatus("success");
   } catch (error) {
     console.error(error);
@@ -482,7 +538,7 @@ async function generateCircuitMaterials() {
     setFeedback(`${t("feedback.generateFailed")}${translateBackendError(readableErrorMessage(error))}`, true);
     setApiStatus("error");
   } finally {
-    setLoadingState(false);
+    setLoadingState(task, false);
   }
 }
 
@@ -493,8 +549,12 @@ function translateBackendError(message) {
 
   const knownTranslations = {
     "請提供文字需求或圖片。": "Please provide a text request or an image.",
+    "請先生成或貼上 Falstad 代碼，再進行這一步。": "Please generate or paste Falstad code first before running this step.",
     "圖片格式無法解析，請重新上載。": "The image format could not be parsed. Please upload it again.",
     "AI 沒有回傳文字內容，請再試一次。": "The AI returned no text. Please try again.",
+    "AI 沒有回傳 Falstad 代碼，請再試一次。": "The AI returned no Falstad code. Please try again.",
+    "AI 沒有回傳教學指引，請再試一次。": "The AI returned no teaching guide. Please try again.",
+    "AI 沒有回傳解題教學內容，請再試一次。": "The AI returned no tutoring content. Please try again.",
     "AI 規劃階段沒有回傳可用內容，請再試一次。": "The AI planning step returned no usable content. Please try again.",
     "AI 回應不是有效 JSON，請再按一次 Generate。": "The AI response was not valid JSON. Please click Generate again.",
     "AI 回應過長，系統已自動改用更精簡版本重試，但仍未完成。請把需求拆細一點，或先生成較簡單的單一電路。":
@@ -504,20 +564,6 @@ function translateBackendError(message) {
   };
 
   return knownTranslations[message] || message;
-}
-
-function joinGuide(analysis, teachingGuide) {
-  const sections = [];
-
-  if (analysis) {
-    sections.push(`${t("guideHeaders.analysis")}\n${analysis.trim()}`);
-  }
-
-  if (teachingGuide) {
-    sections.push(`${t("guideHeaders.teachingGuide")}\n${teachingGuide.trim()}`);
-  }
-
-  return sections.join("\n\n");
 }
 
 function setFeedback(message, isError, feedbackKey = null) {
@@ -534,10 +580,36 @@ function setSimulatorStatus(state) {
   els.simulatorStatus.textContent = t(`simulatorStatus.${state}`);
 }
 
-function setLoadingState(isLoading) {
-  els.generateButton.disabled = isLoading;
-  els.generateButton.textContent = isLoading ? `${t("generateButton")}...` : t("generateButton");
-  setApiStatus(isLoading ? "loading" : "idle");
+function capitalizeTask(task) {
+  return task.charAt(0).toUpperCase() + task.slice(1);
+}
+
+function refreshActionButtons() {
+  const buttonMap = {
+    circuit: els.generateCircuitButton,
+    guide: els.generateGuideButton,
+    tutor: els.generateTutorButton,
+  };
+
+  Object.entries(buttonMap).forEach(([task, button]) => {
+    if (!button) {
+      return;
+    }
+
+    const label = t(`generate${capitalizeTask(task)}Button`);
+    button.textContent = currentLoadingTask === task ? `${label}...` : label;
+  });
+}
+
+function setLoadingState(task, isLoading) {
+  currentLoadingTask = isLoading ? task : null;
+  els.generateCircuitButton.disabled = isLoading;
+  els.generateGuideButton.disabled = isLoading;
+  els.generateTutorButton.disabled = isLoading;
+  refreshActionButtons();
+  if (isLoading) {
+    setApiStatus("loading");
+  }
 }
 
 function readableErrorMessage(error) {
