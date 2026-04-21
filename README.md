@@ -43,14 +43,15 @@
 
 1. 學生在左側輸入文字需求或上載圖片
 2. 前端把資料送到 `POST /api/generate`
-3. `server.rb` 先用 `planner` 階段做隱藏規劃，再用 `formatter` 階段輸出嚴格 JSON
-4. 後端回傳：
-   - `analysis`
+3. `server.rb` 會先要求 Gemini 產生「香港中學物理元件 schema」
+4. 後端把 schema 本地編譯成 Falstad 專用代碼；如果 schema 路徑失敗，會自動 fallback 到直接 Falstad 生成
+5. guide / tutor 任務則以現有 Falstad 代碼為基礎生成
+6. 後端回傳：
    - `falstad_code`
-   - `teaching_guide`
+   - `teaching_guide` 或 `tutor_response`
    - `raw_output`
-5. 前端把 Falstad 代碼、教學指引與 Raw AI Output 顯示出來
-6. 學生可直接按 `載入右側模擬器` 匯入 Falstad
+7. 前端把 Falstad 代碼、教學指引 / 解題教學與 Raw AI Output 顯示出來
+8. 學生可直接按 `載入右側模擬器` 匯入 Falstad
 
 ## 本地設定
 
@@ -177,8 +178,10 @@ vendor/circuitjs1-source/
 
 ## 目前已加入的穩定化措施
 
-- 使用 `planner -> formatter` 雙階段生成
-- 使用 JSON schema 約束 Gemini 輸出
+- `Generate Circuit` 主路徑改為：`課程元件 schema -> 本地 compiler -> Falstad code`
+- schema 只使用課程元件語言：`battery / resistor / internal_resistance / variable_resistor / lamp / switch / ammeter / voltmeter / wire`
+- 使用 JSON schema 約束 Gemini 先輸出結構化元件資料，而不是直接猜 Falstad dump type
+- 如果 schema 路徑失敗，後端會自動 fallback 到直接 Falstad 生成
 - 若 Gemini API 回傳 `503 high demand` / `UNAVAILABLE`，後端會自動重試
 - 若回應被截斷，會自動改用 compact / minimal 版本重試
 - 若回應不是標準 JSON，會做修復嘗試
@@ -244,17 +247,16 @@ vendor/circuitjs1-source/
 1. 第一步讓模型先做較自由的草稿規劃
 2. 第二步再把草稿轉成嚴格 JSON
 
-這種做法通常比直接要求模型一次輸出最終 JSON 更穩定，也更容易兼顧推理品質與格式控制。
+這樣的設計重點不是讓 AI 直接講 Falstad 內部語言，而是先讓它講比較接近香港中學課程的元件語言，再交給本地 compiler 處理 Falstad 的怪格式。
 
 ## 之後可考慮的升級方向
 
 1. 加入後端快取，避免相同 prompt 重複花 token
 2. 加入生成紀錄與教師題庫
-3. 把 AI 生成拆成兩步：
-   - planner
-   - strict JSON formatter
-4. 加入 Falstad 代碼驗證器
-5. 加入學生操作紀錄
+3. 擴充課程元件 schema，例如加入 `cell pack`、`fuse`、`motor`
+4. 為 voltmeter / ammeter 提供更接近學校圖符的本地繪製策略
+5. 加入 Falstad 代碼驗證器
+6. 加入學生操作紀錄
 
 ## 來源
 

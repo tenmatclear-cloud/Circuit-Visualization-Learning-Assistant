@@ -21,6 +21,18 @@ CURL_RETRY_ATTEMPTS = 3
 API_STATUS_RETRY_ATTEMPTS = 3
 JOB_RETENTION_SECONDS = 3600
 MAX_STORED_JOBS = 100
+SUPPORTED_CIRCUIT_COMPONENT_TYPES = %w[
+  wire
+  battery
+  resistor
+  internal_resistance
+  variable_resistor
+  lamp
+  switch
+  ammeter
+  voltmeter
+].freeze
+FALSTAD_HEADER = "$ 1 0.000005 10.20027730826997 50 5 43"
 
 class GenerationError < StandardError
   attr_reader :raw_output, :status_code, :upstream_data
@@ -90,6 +102,56 @@ def json_schema
     },
     "required" => ["analysis", "falstad_code", "teaching_guide"],
     "propertyOrdering" => ["analysis", "falstad_code", "teaching_guide"]
+  }
+end
+
+def circuit_component_schema
+  {
+    "type" => "object",
+    "properties" => {
+      "summary" => { "type" => "string" },
+      "components" => {
+        "type" => "array",
+        "items" => {
+          "type" => "object",
+          "properties" => {
+            "id" => { "type" => "string" },
+            "label" => { "type" => "string" },
+            "type" => { "type" => "string", "enum" => SUPPORTED_CIRCUIT_COMPONENT_TYPES },
+            "x1" => { "type" => "integer" },
+            "y1" => { "type" => "integer" },
+            "x2" => { "type" => "integer" },
+            "y2" => { "type" => "integer" },
+            "wiper_x" => { "type" => "integer" },
+            "wiper_y" => { "type" => "integer" },
+            "voltage" => { "type" => "number" },
+            "resistance" => { "type" => "number" },
+            "max_resistance" => { "type" => "number" },
+            "position" => { "type" => "number" },
+            "state" => { "type" => "string", "enum" => %w[open closed] }
+          },
+          "required" => ["type", "x1", "y1", "x2", "y2"],
+          "propertyOrdering" => [
+            "id",
+            "label",
+            "type",
+            "x1",
+            "y1",
+            "x2",
+            "y2",
+            "wiper_x",
+            "wiper_y",
+            "voltage",
+            "resistance",
+            "max_resistance",
+            "position",
+            "state"
+          ]
+        }
+      }
+    },
+    "required" => ["components"],
+    "propertyOrdering" => ["summary", "components"]
   }
 end
 
@@ -981,6 +1043,56 @@ def perform_generation_relaxed(payloads, api_key, preferred_model)
   raise "Google API 請求失敗。"
 end
 
+def build_circuit_schema_payload(prompt_text, image_data_url, output_language, model, compact: false)
+  instruction_lines =
+    if output_language.to_s == "en"
+      [
+        "Output one JSON object for a Hong Kong secondary-school circuit schema.",
+        "The JSON must use only these component types: wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter.",
+        "Use components only. Do not output raw Falstad dump lines.",
+        "All coordinates must be integers and multiples of 16.",
+        "Every wire, resistor, lamp, switch, ammeter, voltmeter, battery, and internal_resistance must be horizontal or vertical.",
+        "Use wire components to build corners, rectangles, and branches.",
+        "If the source circuit has battery internal resistance, output a battery component and a separate internal_resistance component in series.",
+        "If the circuit uses a variable resistor, output type variable_resistor and include wiper_x and wiper_y.",
+        compact ? "Prefer the simplest valid layout that preserves the topology." : "Preserve the topology faithfully and keep the layout tidy.",
+        "Only include id or label when the source diagram or the request explicitly names a component, such as X, Y, Z, A, V, R1, or S1.",
+        "Do not add decorative labels, arrows, or explanatory text."
+      ]
+    else
+      [
+        "請輸出一個香港中學物理電路用的 JSON schema。",
+        "JSON 只可使用這些元件類型：wire、battery、resistor、internal_resistance、variable_resistor、lamp、switch、ammeter、voltmeter。",
+        "請只輸出 schema，不要輸出原始 Falstad dump 代碼。",
+        "所有座標都必須是整數，而且一定要是 16 的倍數。",
+        "wire、resistor、lamp、switch、ammeter、voltmeter、battery、internal_resistance 都必須保持水平或垂直。",
+        "所有轉角、長方形框架、分支都請用 wire 元件補齊。",
+        "如果題目涉及電池內電阻，請輸出一個 battery 元件，再輸出一個與之串聯的 internal_resistance 元件。",
+        "如果題目有可變電阻，請使用 type=variable_resistor，並提供 wiper_x 與 wiper_y。",
+        compact ? "請優先使用最簡潔但仍保留拓撲的佈局。" : "請忠實保留拓撲，並保持佈局整齊。",
+        "只有在原圖或文字需求明確出現 X、Y、Z、A、V、R1、S1 等名稱時，才加入 id 或 label。",
+        "不要加入裝飾性標示、箭頭或解說文字。"
+      ]
+    end
+
+  {
+    "contents" => [
+      {
+        "role" => "user",
+        "parts" => build_task_parts(prompt_text, image_data_url, instruction_lines.join("\n"), output_language)
+      }
+    ],
+    "generationConfig" => build_generation_config(
+      model,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      temperature: 0,
+      response_mime_type: "application/json",
+      response_schema: circuit_component_schema,
+      thinking_level: compact ? "low" : "medium"
+    )
+  }
+end
+
 def build_circuit_code_payload(prompt_text, image_data_url, output_language, model, emitted_code: "", compact: false)
   instruction_lines = [
     output_language.to_s == "en" ? "Your only task is to output Falstad circuit code that can be imported directly." : "你現在唯一的任務，是輸出可直接匯入 Falstad 的電路代碼。",
@@ -1017,6 +1129,217 @@ def build_circuit_code_payload(prompt_text, image_data_url, output_language, mod
       thinking_level: compact ? "low" : "medium"
     )
   }
+end
+
+def normalize_component_type(raw_type)
+  case raw_type.to_s.strip.downcase
+  when "wire", "w"
+    "wire"
+  when "battery", "cell", "voltage_source", "dc_voltage"
+    "battery"
+  when "resistor", "load"
+    "resistor"
+  when "internal_resistance", "inner_resistance", "battery_internal_resistance"
+    "internal_resistance"
+  when "variable_resistor", "var_resistor", "pot", "potentiometer", "rheostat"
+    "variable_resistor"
+  when "lamp", "bulb", "light_bulb"
+    "lamp"
+  when "switch", "spst_switch"
+    "switch"
+  when "ammeter", "current_meter"
+    "ammeter"
+  when "voltmeter", "voltage_meter", "probe"
+    "voltmeter"
+  else
+    raw_type.to_s.strip.downcase
+  end
+end
+
+def parse_circuit_schema_json(raw_text)
+  normalized = normalize_model_text(raw_text)
+  candidate = extract_json_candidate(normalized) || normalized
+  parsed = JSON.parse(candidate)
+  raise "AI 沒有回傳元件 schema。" unless parsed.is_a?(Hash)
+
+  parsed
+end
+
+def integer_coordinate!(value, key)
+  integer = Integer(value)
+  raise "#{key} 必須是 16 的倍數。" unless (integer % 16).zero?
+
+  integer
+rescue ArgumentError, TypeError
+  raise "#{key} 必須是整數。"
+end
+
+def positive_number(value, default)
+  number = value.nil? ? default : value.to_f
+  number.positive? ? number : default
+end
+
+def bounded_ratio(value, default = 0.5)
+  number = value.nil? ? default : value.to_f
+  [[number, 0.05].max, 0.95].min
+end
+
+def component_midpoint(component)
+  [
+    ((component["x1"] + component["x2"]) / 2.0).round,
+    ((component["y1"] + component["y2"]) / 2.0).round
+  ]
+end
+
+def build_text_label_line(text, x, y, size: 20)
+  escaped = text.to_s.strip.gsub("\\", "\\\\\\").gsub(" ", "\\s").gsub("+", "%2B")
+  "x #{x} #{y} #{x + 16} #{y} 4 #{size} #{escaped}"
+end
+
+def build_component_label_lines(component)
+  type = component["type"]
+  label_text = component["label"].to_s.strip
+  label_text = component["id"].to_s.strip if label_text.empty?
+
+  if label_text.empty?
+    label_text =
+      case type
+      when "ammeter" then "A"
+      when "voltmeter" then "V"
+      else ""
+      end
+  end
+
+  return [] if label_text.empty?
+
+  mid_x, mid_y = component_midpoint(component)
+  if component["x1"] == component["x2"]
+    [build_text_label_line(label_text, mid_x + 24, mid_y)]
+  else
+    [build_text_label_line(label_text, mid_x - 8, mid_y - 32)]
+  end
+end
+
+def normalize_schema_component(component, index)
+  raise "第 #{index + 1} 個元件不是有效物件。" unless component.is_a?(Hash)
+
+  normalized = component.transform_keys(&:to_s)
+  normalized["type"] = normalize_component_type(normalized["type"])
+  raise "第 #{index + 1} 個元件缺少有效 type。" unless SUPPORTED_CIRCUIT_COMPONENT_TYPES.include?(normalized["type"])
+
+  %w[x1 y1 x2 y2].each do |key|
+    normalized[key] = integer_coordinate!(normalized[key], "元件 #{index + 1} 的 #{key}")
+  end
+
+  if normalized["type"] != "variable_resistor" && normalized["x1"] != normalized["x2"] && normalized["y1"] != normalized["y2"]
+    raise "元件 #{index + 1}（#{normalized["type"]}）必須保持水平或垂直。"
+  end
+
+  if normalized["type"] == "variable_resistor"
+    unless normalized["x1"] == normalized["x2"] || normalized["y1"] == normalized["y2"]
+      raise "variable_resistor 的主體必須保持水平或垂直。"
+    end
+
+    if normalized["y1"] == normalized["y2"]
+      normalized["wiper_x"] = integer_coordinate!(normalized["wiper_x"] || ((normalized["x1"] + normalized["x2"]) / 2), "元件 #{index + 1} 的 wiper_x")
+      normalized["wiper_y"] = integer_coordinate!(normalized["wiper_y"], "元件 #{index + 1} 的 wiper_y")
+    else
+      normalized["wiper_x"] = integer_coordinate!(normalized["wiper_x"], "元件 #{index + 1} 的 wiper_x")
+      normalized["wiper_y"] = integer_coordinate!(normalized["wiper_y"] || ((normalized["y1"] + normalized["y2"]) / 2), "元件 #{index + 1} 的 wiper_y")
+    end
+  end
+
+  normalized
+end
+
+def compile_battery_line(component)
+  voltage = positive_number(component["voltage"], 9)
+  "v #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0 0 40 #{voltage} 0 0 0.5"
+end
+
+def compile_resistor_like_line(component)
+  resistance_default = component["type"] == "internal_resistance" ? 1 : 100
+  resistance = positive_number(component["resistance"], resistance_default)
+  "r #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0 #{resistance}"
+end
+
+def compile_switch_line(component)
+  state = component["state"].to_s.strip.downcase
+  position = state == "open" ? 1 : 0
+  "s #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0 #{position} false"
+end
+
+def compile_variable_resistor_line(component)
+  max_resistance = positive_number(component["max_resistance"] || component["resistance"], 1000)
+  position = bounded_ratio(component["position"], 0.5)
+  slider_label = component["label"].to_s.strip
+  slider_label = component["id"].to_s.strip if slider_label.empty?
+  slider_label = "Resistance" if slider_label.empty?
+  slider_label = slider_label.gsub("\\", "\\\\\\").gsub(" ", "\\s")
+
+  if component["y1"] == component["y2"]
+    raw_x2 = component["x2"]
+    raw_y2 = component["wiper_y"]
+  else
+    raw_x2 = component["wiper_x"]
+    raw_y2 = component["y2"]
+  end
+
+  "174 #{component["x1"]} #{component["y1"]} #{raw_x2} #{raw_y2} 1 #{max_resistance} #{position} #{slider_label}"
+end
+
+def compile_course_component(component)
+  case component["type"]
+  when "wire"
+    "w #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0"
+  when "battery"
+    compile_battery_line(component)
+  when "resistor", "internal_resistance"
+    compile_resistor_like_line(component)
+  when "variable_resistor"
+    compile_variable_resistor_line(component)
+  when "lamp"
+    "181 #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0 300 100 120 0.4 0.4"
+  when "switch"
+    compile_switch_line(component)
+  when "ammeter"
+    "370 #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 1 0"
+  when "voltmeter"
+    "p #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0"
+  else
+    raise "不支援的元件類型：#{component["type"]}"
+  end
+end
+
+def compile_course_schema_to_falstad(parsed_schema)
+  components = Array(parsed_schema["components"] || parsed_schema[:components])
+  raise "AI 沒有回傳任何元件。" if components.empty?
+
+  normalized_components = components.each_with_index.map { |component, index| normalize_schema_component(component, index) }
+  element_lines = normalized_components.map { |component| compile_course_component(component) }
+  label_lines = normalized_components.flat_map { |component| build_component_label_lines(component) }
+
+  ([FALSTAD_HEADER] + element_lines + label_lines).join("\n")
+end
+
+def generate_circuit_schema(prompt_text, image_data_url, output_language, api_key, model)
+  payloads = [
+    build_circuit_schema_payload(prompt_text, image_data_url, output_language, model, compact: false),
+    build_circuit_schema_payload(prompt_text, image_data_url, output_language, model, compact: true)
+  ]
+
+  status_code, data, model_used = perform_generation(payloads, api_key, model)
+  raw_text = extract_output_text(data)
+  parsed_schema = parse_circuit_schema_json(raw_text)
+  raw_output = append_named_raw_output("", "Circuit Schema", JSON.pretty_generate(parsed_schema))
+  [status_code, data, parsed_schema, raw_output, model_used]
+rescue GenerationError => e
+  raise GenerationError.new(
+    e.message,
+    raw_output: append_named_raw_output("", "Circuit Schema", e.raw_output),
+    status_code: e.status_code,
+    upstream_data: e.upstream_data
+  )
 end
 
 def clean_falstad_code(text)
@@ -1167,13 +1490,50 @@ def execute_generate_task(task, prompt_text, image_data_url, output_language, fa
   when "circuit"
     raise "請提供文字需求或圖片。" if prompt_text.empty? && image_data_url.empty?
 
-    status_code, upstream_data, falstad_code_text, raw_output, model_used = generate_circuit_code(
-      prompt_text,
-      image_data_url,
-      output_language,
-      api_key,
-      model
-    )
+    raw_output = ""
+    begin
+      status_code, upstream_data, parsed_schema, schema_raw_output, model_used = generate_circuit_schema(
+        prompt_text,
+        image_data_url,
+        output_language,
+        api_key,
+        model
+      )
+      falstad_code_text = compile_course_schema_to_falstad(parsed_schema)
+      raw_output = append_named_raw_output(schema_raw_output, "Compiled Falstad Code", falstad_code_text)
+    rescue StandardError => schema_error
+      raw_output =
+        if schema_error.is_a?(GenerationError)
+          schema_error.raw_output.to_s
+        else
+          append_named_raw_output("", "Circuit Schema", schema_error.message)
+        end
+
+      raw_output = append_named_raw_output(raw_output, "Schema Fallback", "Schema compiler failed, so the server retried direct Falstad generation.")
+
+      begin
+        status_code, upstream_data, falstad_code_text, direct_raw_output, model_used = generate_circuit_code(
+          prompt_text,
+          image_data_url,
+          output_language,
+          api_key,
+          model
+        )
+        raw_output = append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_raw_output)
+      rescue GenerationError => direct_error
+        raise GenerationError.new(
+          direct_error.message,
+          raw_output: append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_error.raw_output),
+          status_code: direct_error.status_code,
+          upstream_data: direct_error.upstream_data
+        )
+      rescue StandardError => direct_error
+        raise GenerationError.new(
+          direct_error.message,
+          raw_output: append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_error.message)
+        )
+      end
+    end
 
     unless status_code.between?(200, 299)
       error_message = upstream_data.dig("error", "message") || JSON.generate(upstream_data)
@@ -1242,6 +1602,7 @@ end
 
 config = load_config
 
+unless ENV["SKIP_SERVER_START"] == "1"
 server = WEBrick::HTTPServer.new(
   BindAddress: ENV.fetch("HOST", "0.0.0.0"),
   Port: config["port"],
@@ -1402,3 +1763,4 @@ trap("TERM") { server.shutdown }
 
 puts "Serving Circuit Visualizer at http://localhost:#{config["port"]}"
 server.start
+end
