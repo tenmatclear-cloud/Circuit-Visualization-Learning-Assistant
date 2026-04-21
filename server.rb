@@ -1055,6 +1055,8 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
         "Use wire components to build corners, rectangles, and branches.",
         "If the source circuit has battery internal resistance, output a battery component and a separate internal_resistance component in series.",
         "If the circuit uses a variable resistor, output type variable_resistor and include wiper_x and wiper_y.",
+        "If the circuit includes an ammeter, output type ammeter. If it includes a voltmeter or scope probe, output type voltmeter.",
+        "Ammeter and voltmeter should be treated as circular inline meters suitable for classroom diagrams.",
         compact ? "Prefer the simplest valid layout that preserves the topology." : "Preserve the topology faithfully and keep the layout tidy.",
         "Only include id or label when the source diagram or the request explicitly names a component, such as X, Y, Z, A, V, R1, or S1.",
         "Do not add decorative labels, arrows, or explanatory text."
@@ -1069,6 +1071,8 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
         "所有轉角、長方形框架、分支都請用 wire 元件補齊。",
         "如果題目涉及電池內電阻，請輸出一個 battery 元件，再輸出一個與之串聯的 internal_resistance 元件。",
         "如果題目有可變電阻，請使用 type=variable_resistor，並提供 wiper_x 與 wiper_y。",
+        "如果電路包含安培計，請直接使用 type=ammeter；如果包含伏特計或 scope probe，請直接使用 type=voltmeter。",
+        "安培計與伏特計都應視為適合課堂圖示的圓形在線儀表。",
         compact ? "請優先使用最簡潔但仍保留拓撲的佈局。" : "請忠實保留拓撲，並保持佈局整齊。",
         "只有在原圖或文字需求明確出現 X、Y、Z、A、V、R1、S1 等名稱時，才加入 id 或 label。",
         "不要加入裝飾性標示、箭頭或解說文字。"
@@ -1099,6 +1103,7 @@ def build_circuit_code_payload(prompt_text, image_data_url, output_language, mod
     output_language.to_s == "en" ? "Output only plain Falstad code. No JSON, no markdown, no explanations." : "只輸出 Falstad 純文字代碼，不要 JSON，不要 markdown，不要解釋。",
     output_language.to_s == "en" ? "Every X and Y coordinate must be a multiple of 16." : "所有 X 與 Y 座標都必須是 16 的倍數。",
     output_language.to_s == "en" ? "Use legal Falstad elements only. Use 6V or 9V batteries when needed." : "只使用合法的 Falstad 元件；如需要電池，請用 6V 或 9V。",
+    output_language.to_s == "en" ? "If you use an ammeter, use Falstad ammeter code with the circular symbol enabled. If you use a voltmeter, use the circular voltmeter/probe symbol and a high resistance so it behaves like a meter in class diagrams." : "如果使用安培計，請使用帶圓形符號的 Falstad ammeter 代碼；如果使用伏特計，請使用帶圓形符號的 voltmeter/probe，並設定高電阻，使其符合課堂圖示與理想伏特計用途。",
     output_language.to_s == "en" ? "Do not add x text labels, arrows, callouts, or decorative helper lines unless the user explicitly asks for them." : "除非使用者明確要求，否則不要加入 x 文字標示、箭頭、指示線或裝飾性輔助圖形。",
     compact ? (output_language.to_s == "en" ? "Prefer the simplest valid layout that preserves the intended topology." : "請優先使用最簡潔、但仍保留原始拓撲的有效佈局。") : (output_language.to_s == "en" ? "Preserve the intended topology faithfully and keep the layout tidy." : "請忠實保留原有拓撲，並保持佈局整齊。"),
     output_language.to_s == "en" ? "If the code is not finished, end the chunk with [[CONTINUE]]. If finished, end with [[END]]." : "如果代碼尚未完成，請在最後一行輸出 [[CONTINUE]]；若已完成，請在最後一行輸出 [[END]]。"
@@ -1197,18 +1202,8 @@ def build_text_label_line(text, x, y, size: 20)
 end
 
 def build_component_label_lines(component)
-  type = component["type"]
   label_text = component["label"].to_s.strip
   label_text = component["id"].to_s.strip if label_text.empty?
-
-  if label_text.empty?
-    label_text =
-      case type
-      when "ammeter" then "A"
-      when "voltmeter" then "V"
-      else ""
-      end
-  end
 
   return [] if label_text.empty?
 
@@ -1303,9 +1298,9 @@ def compile_course_component(component)
   when "switch"
     compile_switch_line(component)
   when "ammeter"
-    "370 #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 1 0"
+    "370 #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 3 0"
   when "voltmeter"
-    "p #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0"
+    "p #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 3 0 10000000"
   else
     raise "不支援的元件類型：#{component["type"]}"
   end
