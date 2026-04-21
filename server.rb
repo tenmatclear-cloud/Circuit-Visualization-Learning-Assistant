@@ -2,6 +2,7 @@ require "json"
 require "open3"
 require "openssl"
 require "pathname"
+require "securerandom"
 require "timeout"
 require "uri"
 require "webrick"
@@ -18,6 +19,8 @@ PLANNER_COMPACT_MAX_OUTPUT_TOKENS = 65_536
 PLANNER_MINIMAL_MAX_OUTPUT_TOKENS = 65_536
 CURL_RETRY_ATTEMPTS = 3
 API_STATUS_RETRY_ATTEMPTS = 3
+JOB_RETENTION_SECONDS = 3600
+MAX_STORED_JOBS = 100
 
 class GenerationError < StandardError
   attr_reader :raw_output, :status_code, :upstream_data
@@ -1124,6 +1127,119 @@ def generate_plain_text_task(payload, api_key, model)
   [status_code, data, raw_text, model_used]
 end
 
+JOBS = {}
+JOBS_MUTEX = Mutex.new
+
+def cleanup_jobs_locked
+  cutoff = Time.now.to_i - JOB_RETENTION_SECONDS
+  JOBS.delete_if do |_job_id, job|
+    %w[completed failed].include?(job["status"]) && job["updated_at"].to_i < cutoff
+  end
+
+  return unless JOBS.length > MAX_STORED_JOBS
+
+  removable_ids = JOBS
+    .select { |_job_id, job| %w[completed failed].include?(job["status"]) }
+    .sort_by { |_job_id, job| job["updated_at"].to_i }
+    .map(&:first)
+
+  removable_ids.first(JOBS.length - MAX_STORED_JOBS).each { |job_id| JOBS.delete(job_id) }
+end
+
+def store_job(job_id, payload)
+  JOBS_MUTEX.synchronize do
+    JOBS[job_id] ||= {}
+    JOBS[job_id].merge!(payload)
+    JOBS[job_id]["updated_at"] = Time.now.to_i
+    cleanup_jobs_locked
+  end
+end
+
+def fetch_job(job_id)
+  JOBS_MUTEX.synchronize do
+    job = JOBS[job_id]
+    job && job.dup
+  end
+end
+
+def execute_generate_task(task, prompt_text, image_data_url, output_language, falstad_code_input, api_key, model)
+  case task
+  when "circuit"
+    raise "請提供文字需求或圖片。" if prompt_text.empty? && image_data_url.empty?
+
+    status_code, upstream_data, falstad_code_text, raw_output, model_used = generate_circuit_code(
+      prompt_text,
+      image_data_url,
+      output_language,
+      api_key,
+      model
+    )
+
+    unless status_code.between?(200, 299)
+      error_message = upstream_data.dig("error", "message") || JSON.generate(upstream_data)
+      raise GenerationError.new(error_message, raw_output: raw_output, status_code: status_code, upstream_data: upstream_data)
+    end
+
+    falstad_code = normalize_model_field(falstad_code_text, preserve_newlines: true)
+    raise "AI 沒有回傳 Falstad 代碼，請再試一次。" if falstad_code.empty?
+
+    {
+      "task" => task,
+      "falstad_code" => falstad_code,
+      "model_used" => model_used,
+      "raw_output" => raw_output
+    }
+  when "guide"
+    raise "請先生成或貼上 Falstad 代碼，再進行這一步。" if falstad_code_input.empty?
+
+    status_code, guide_data, guide_text, model_used = generate_plain_text_task(
+      build_guide_payload(prompt_text, output_language, falstad_code_input, model),
+      api_key,
+      model
+    )
+    raw_output = append_named_raw_output("", "Guide", build_raw_output(guide_text, guide_data))
+
+    unless status_code.between?(200, 299)
+      error_message = guide_data.dig("error", "message") || JSON.generate(guide_data)
+      raise GenerationError.new(error_message, raw_output: raw_output, status_code: status_code, upstream_data: guide_data)
+    end
+
+    raise "AI 沒有回傳教學指引，請再試一次。" if guide_text.empty?
+
+    {
+      "task" => task,
+      "teaching_guide" => guide_text,
+      "model_used" => model_used,
+      "raw_output" => raw_output
+    }
+  when "tutor"
+    raise "請先生成或貼上 Falstad 代碼，再進行這一步。" if falstad_code_input.empty?
+
+    status_code, tutor_data, tutor_text, model_used = generate_plain_text_task(
+      build_tutor_payload(prompt_text, output_language, falstad_code_input, model),
+      api_key,
+      model
+    )
+    raw_output = append_named_raw_output("", "Tutor", build_raw_output(tutor_text, tutor_data))
+
+    unless status_code.between?(200, 299)
+      error_message = tutor_data.dig("error", "message") || JSON.generate(tutor_data)
+      raise GenerationError.new(error_message, raw_output: raw_output, status_code: status_code, upstream_data: tutor_data)
+    end
+
+    raise "AI 沒有回傳解題教學內容，請再試一次。" if tutor_text.empty?
+
+    {
+      "task" => task,
+      "tutor_response" => tutor_text,
+      "model_used" => model_used,
+      "raw_output" => raw_output
+    }
+  else
+    raise "不支援的生成任務。"
+  end
+end
+
 config = load_config
 
 server = WEBrick::HTTPServer.new(
@@ -1165,138 +1281,92 @@ server.mount_proc "/api/generate" do |req, res|
     next
   end
 
+  raw_output = ""
   begin
     request_body = JSON.parse(req.body)
+    job_id = request_body["jobId"].to_s.strip
+
+    unless job_id.empty?
+      job = fetch_job(job_id)
+
+      if job.nil?
+        json_response(res, status: 404, body: { error: "找不到這個生成工作，請重新開始。" })
+      else
+        json_response(res, status: 200, body: job)
+      end
+      next
+    end
+
     task = request_body["task"].to_s.strip
     task = "circuit" if task.empty?
     prompt_text = request_body["promptText"].to_s.strip
     image_data_url = request_body["imageDataUrl"].to_s.strip
     output_language = request_body["outputLanguage"].to_s.strip
     falstad_code_input = normalize_model_field(request_body["falstadCode"].to_s, preserve_newlines: true)
-    raw_output = ""
-    case task
-    when "circuit"
-      if prompt_text.empty? && image_data_url.empty?
-        json_response(res, status: 400, body: { error: "請提供文字需求或圖片。" })
-        next
-      end
+    job_id = SecureRandom.hex(12)
 
-      status_code, upstream_data, falstad_code_text, raw_output, model_used = generate_circuit_code(
-        prompt_text,
-        image_data_url,
-        output_language,
-        api_key,
-        config["google_model"]
-      )
+    store_job(
+      job_id,
+      {
+        "job_id" => job_id,
+        "task" => task,
+        "status" => "queued",
+        "raw_output" => ""
+      }
+    )
 
-      unless status_code.between?(200, 299)
-        error_message = upstream_data.dig("error", "message") || JSON.generate(upstream_data)
-        json_response(
-          res,
-          status: status_code,
-          body: {
-            error: error_message,
-            model_used: model_used,
-            raw_output: raw_output
+    Thread.new do
+      Thread.current.report_on_exception = false if Thread.current.respond_to?(:report_on_exception=)
+      store_job(job_id, { "status" => "running" })
+
+      begin
+        result = execute_generate_task(task, prompt_text, image_data_url, output_language, falstad_code_input, api_key, config["google_model"])
+        store_job(job_id, result.merge("job_id" => job_id, "status" => "completed"))
+      rescue JSON::ParserError
+        store_job(
+          job_id,
+          {
+            "job_id" => job_id,
+            "task" => task,
+            "status" => "failed",
+            "error" => "AI 回應不是有效 JSON，請再按一次 Generate。",
+            "raw_output" => ""
           }
         )
-        next
-      end
-
-      falstad_code = normalize_model_field(falstad_code_text, preserve_newlines: true)
-      raise "AI 沒有回傳 Falstad 代碼，請再試一次。" if falstad_code.empty?
-
-      json_response(
-        res,
-        status: 200,
-        body: {
-          task: task,
-          falstad_code: falstad_code,
-          model_used: model_used,
-          raw_output: raw_output
-        }
-      )
-    when "guide"
-      if falstad_code_input.empty?
-        json_response(res, status: 400, body: { error: "請先生成或貼上 Falstad 代碼，再進行這一步。" })
-        next
-      end
-
-      status_code, guide_data, guide_text, model_used = generate_plain_text_task(
-        build_guide_payload(prompt_text, output_language, falstad_code_input, config["google_model"]),
-        api_key,
-        config["google_model"]
-      )
-      raw_output = append_named_raw_output("", "Guide", build_raw_output(guide_text, guide_data))
-
-      unless status_code.between?(200, 299)
-        error_message = guide_data.dig("error", "message") || JSON.generate(guide_data)
-        json_response(
-          res,
-          status: status_code,
-          body: {
-            error: error_message,
-            model_used: model_used,
-            raw_output: raw_output
+      rescue GenerationError => e
+        store_job(
+          job_id,
+          {
+            "job_id" => job_id,
+            "task" => task,
+            "status" => "failed",
+            "error" => e.message,
+            "raw_output" => e.raw_output.to_s
           }
         )
-        next
-      end
-
-      raise "AI 沒有回傳教學指引，請再試一次。" if guide_text.empty?
-
-      json_response(
-        res,
-        status: 200,
-        body: {
-          task: task,
-          teaching_guide: guide_text,
-          model_used: model_used,
-          raw_output: raw_output
-        }
-      )
-    when "tutor"
-      if falstad_code_input.empty?
-        json_response(res, status: 400, body: { error: "請先生成或貼上 Falstad 代碼，再進行這一步。" })
-        next
-      end
-
-      status_code, tutor_data, tutor_text, model_used = generate_plain_text_task(
-        build_tutor_payload(prompt_text, output_language, falstad_code_input, config["google_model"]),
-        api_key,
-        config["google_model"]
-      )
-      raw_output = append_named_raw_output("", "Tutor", build_raw_output(tutor_text, tutor_data))
-
-      unless status_code.between?(200, 299)
-        error_message = tutor_data.dig("error", "message") || JSON.generate(tutor_data)
-        json_response(
-          res,
-          status: status_code,
-          body: {
-            error: error_message,
-            model_used: model_used,
-            raw_output: raw_output
+      rescue StandardError => e
+        store_job(
+          job_id,
+          {
+            "job_id" => job_id,
+            "task" => task,
+            "status" => "failed",
+            "error" => e.message,
+            "raw_output" => ""
           }
         )
-        next
       end
-
-      raise "AI 沒有回傳解題教學內容，請再試一次。" if tutor_text.empty?
-
-      json_response(
-        res,
-        status: 200,
-        body: {
-          task: task,
-          tutor_response: tutor_text,
-          model_used: model_used,
-          raw_output: raw_output
-        }
-      )
-    else
-      json_response(res, status: 400, body: { error: "不支援的生成任務。" })
     end
+
+    json_response(
+      res,
+      status: 202,
+      body: {
+        "job_id" => job_id,
+        "task" => task,
+        "status" => "queued"
+      }
+    )
   rescue JSON::ParserError
     json_response(
       res,

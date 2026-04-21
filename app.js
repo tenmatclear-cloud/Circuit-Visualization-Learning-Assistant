@@ -263,6 +263,8 @@ let falstadSim = null;
 let simulatorPollTimer = null;
 let currentFeedbackKey = "helperText";
 let currentLoadingTask = null;
+const JOB_POLL_INTERVAL_MS = 2000;
+const JOB_POLL_MAX_ATTEMPTS = 240;
 
 els.langZhButton.addEventListener("click", () => setLanguage("zh-Hant"));
 els.langEnButton.addEventListener("click", () => setLanguage("en"));
@@ -494,7 +496,7 @@ async function runGenerationTask(task) {
   clearTaskOutputs(task);
 
   try {
-    const response = await fetch(APP_CONFIG.generateEndpoint, {
+    const startResponse = await fetch(APP_CONFIG.generateEndpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -508,15 +510,17 @@ async function runGenerationTask(task) {
       }),
     });
 
-    const payload = await response.json().catch(() => ({}));
-    const rawOutput = payload.raw_output || "";
-    els.rawAiOutput.value = rawOutput;
+    const startPayload = await startResponse.json().catch(() => ({}));
 
-    if (!response.ok) {
-      const error = new Error(payload.error || `API request failed with status ${response.status}`);
-      error.rawOutput = rawOutput;
+    if (!startResponse.ok && startResponse.status !== 202) {
+      const error = new Error(startPayload.error || `API request failed with status ${startResponse.status}`);
+      error.rawOutput = startPayload.raw_output || "";
       throw error;
     }
+
+    const payload = await pollGenerationJob(startPayload.job_id);
+    const rawOutput = payload.raw_output || "";
+    els.rawAiOutput.value = rawOutput;
 
     if (task === "circuit") {
       els.falstadCode.value = normalizeGeneratedText(payload.falstad_code, true);
@@ -542,14 +546,69 @@ async function runGenerationTask(task) {
   }
 }
 
+function wait(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function pollGenerationJob(jobId) {
+  if (!jobId) {
+    throw new Error("生成工作沒有回傳 job id。");
+  }
+
+  for (let attempt = 0; attempt < JOB_POLL_MAX_ATTEMPTS; attempt += 1) {
+    await wait(attempt === 0 ? 0 : JOB_POLL_INTERVAL_MS);
+
+    const response = await fetch(APP_CONFIG.generateEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ jobId }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const error = new Error(payload.error || `API request failed with status ${response.status}`);
+      error.rawOutput = payload.raw_output || "";
+      throw error;
+    }
+
+    if (payload.raw_output) {
+      els.rawAiOutput.value = payload.raw_output;
+    }
+
+    if (payload.status === "completed") {
+      return payload;
+    }
+
+    if (payload.status === "failed") {
+      const error = new Error(payload.error || "生成工作失敗。");
+      error.rawOutput = payload.raw_output || "";
+      throw error;
+    }
+  }
+
+  throw new Error("生成工作等待逾時，請稍後再試。");
+}
+
 function translateBackendError(message) {
   if (currentLanguage === "zh-Hant") {
+    if (message === "Failed to fetch") {
+      return "網絡連線中斷，通常表示伺服器處理複雜請求時被平台中途切斷。現在系統已改用背景工作模式；請重新整理後再試一次。";
+    }
+
     return message;
   }
 
   const knownTranslations = {
     "請提供文字需求或圖片。": "Please provide a text request or an image.",
     "請先生成或貼上 Falstad 代碼，再進行這一步。": "Please generate or paste Falstad code first before running this step.",
+    "找不到這個生成工作，請重新開始。": "This generation job could not be found. Please start again.",
+    "生成工作沒有回傳 job id。": "The generation job did not return a job id.",
+    "生成工作等待逾時，請稍後再試。": "The generation job took too long to finish. Please try again shortly.",
+    "Failed to fetch":
+      "The network connection was interrupted, usually because the server connection was cut before a response completed. Refresh the page and try again.",
     "圖片格式無法解析，請重新上載。": "The image format could not be parsed. Please upload it again.",
     "AI 沒有回傳文字內容，請再試一次。": "The AI returned no text. Please try again.",
     "AI 沒有回傳 Falstad 代碼，請再試一次。": "The AI returned no Falstad code. Please try again.",
