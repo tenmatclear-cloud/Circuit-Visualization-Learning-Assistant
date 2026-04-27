@@ -1,7 +1,7 @@
 const APP_CONFIG = {
   generateEndpoint: "/api/generate",
   defaultLanguage: "zh-Hant",
-  uploadImageMaxDimension: 1280,
+  uploadImageMaxDimension: 1800,
   simulatorSources: {
     "zh-Hant": "/circuit/circuitjs-zh-tw.html?whiteBackground=false",
     en: "/circuit/circuitjs.html?whiteBackground=false",
