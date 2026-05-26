@@ -1,5 +1,4 @@
 require "json"
-require "open3"
 require "openssl"
 require "pathname"
 require "securerandom"
@@ -13,8 +12,10 @@ CONFIG_PATH = ROOT.join("server-config.local.json")
 POE_CHAT_COMPLETIONS_ENDPOINT = URI("https://api.poe.com/v1/chat/completions")
 MAX_OUTPUT_TOKENS = 65_536
 SCHEMA_MAX_OUTPUT_TOKENS = 65_536
-CURL_RETRY_ATTEMPTS = 3
 API_STATUS_RETRY_ATTEMPTS = 3
+POE_OPEN_TIMEOUT = ENV.fetch("POE_OPEN_TIMEOUT", "30").to_i
+POE_READ_TIMEOUT = ENV.fetch("POE_READ_TIMEOUT", "240").to_i
+POE_TOTAL_TIMEOUT = ENV.fetch("POE_TOTAL_TIMEOUT", "300").to_i
 JOB_RETENTION_SECONDS = 3600
 MAX_STORED_JOBS = 100
 SUPPORTED_CIRCUIT_COMPONENT_TYPES = %w[
@@ -320,6 +321,7 @@ end
 def transport_error?(error)
   error.is_a?(EOFError) ||
     error.is_a?(IOError) ||
+    error.is_a?(Errno::ENOENT) ||
     error.is_a?(Errno::ECONNRESET) ||
     error.is_a?(Net::ReadTimeout) ||
     error.is_a?(OpenSSL::SSL::SSLError) ||
@@ -334,6 +336,12 @@ def retryable_upstream_status?(status_code, data)
   upstream_status.empty? ||
     %w[UNAVAILABLE RESOURCE_EXHAUSTED INTERNAL DEADLINE_EXCEEDED].include?(upstream_status) ||
     %w[timeout_error rate_limit_error provider_error upstream_error overloaded_error].include?(upstream_type)
+end
+
+def transport_error_message?(error)
+  transport_error?(error) ||
+    error.message.to_s.include?("end of file reached") ||
+    error.message.to_s.include?("execution expired")
 end
 
 def poe_content_from_parts(parts)
@@ -386,12 +394,12 @@ def poe_payload_from_generation_payload(payload, model)
 end
 
 def request_poe_via_net_http(payload, api_key, model)
-  Timeout.timeout(60) do
+  Timeout.timeout(POE_TOTAL_TIMEOUT) do
     endpoint = POE_CHAT_COMPLETIONS_ENDPOINT
     http = Net::HTTP.new(endpoint.host, endpoint.port)
     http.use_ssl = true
-    http.open_timeout = 20
-    http.read_timeout = 60
+    http.open_timeout = POE_OPEN_TIMEOUT
+    http.read_timeout = POE_READ_TIMEOUT
     http.keep_alive_timeout = 0
 
     upstream_req = Net::HTTP::Post.new(endpoint)
@@ -405,60 +413,8 @@ def request_poe_via_net_http(payload, api_key, model)
   end
 end
 
-def request_poe_via_curl(payload, api_key, model)
-  endpoint = POE_CHAT_COMPLETIONS_ENDPOINT.to_s
-  last_error = nil
-
-  CURL_RETRY_ATTEMPTS.times do |index|
-    stdout, stderr, status = Open3.capture3(
-      "curl",
-      "--http1.1",
-      "--retry",
-      "2",
-      "--retry-all-errors",
-      "--retry-delay",
-      "1",
-      "--connect-timeout",
-      "20",
-      "--max-time",
-      "90",
-      "-sS",
-      "-X",
-      "POST",
-      endpoint,
-      "-H",
-      "Connection: close",
-      "-H",
-      "Authorization: Bearer #{api_key}",
-      "-H",
-      "Content-Type: application/json",
-      "--data-binary",
-      "@-",
-      "-w",
-      "\n%{http_code}",
-      stdin_data: JSON.generate(poe_payload_from_generation_payload(payload, model))
-    )
-
-    if status.success?
-      body, http_code = stdout.sub(/\n(\d{3})\z/, ""), stdout[/\n(\d{3})\z/, 1]
-      raise "無法判斷 Poe API 回應狀態。" unless http_code
-
-      return [http_code.to_i, body]
-    end
-
-    last_error = stderr.strip.empty? ? "Poe API 連線中斷。" : stderr.strip
-    sleep(index + 1) if index < CURL_RETRY_ATTEMPTS - 1
-  end
-
-  raise last_error || "Poe API 連線失敗。"
-end
-
 def request_poe(payload, api_key, model)
   request_poe_via_net_http(payload, api_key, model)
-rescue StandardError => e
-  raise unless transport_error?(e) || e.message.include?("end of file reached")
-
-  request_poe_via_curl(payload, api_key, model)
 end
 
 def perform_generation(payloads, api_key, preferred_model)
@@ -1162,6 +1118,15 @@ def execute_generate_task(task, prompt_text, image_data_url, output_language, fa
         end
 
       unless image_data_url.empty?
+        if transport_error_message?(schema_error)
+          raise GenerationError.new(
+            "Poe API 連線逾時或中斷，請再試一次。",
+            raw_output: raw_output,
+            status_code: schema_error.respond_to?(:status_code) ? schema_error.status_code : nil,
+            upstream_data: schema_error.respond_to?(:upstream_data) ? schema_error.upstream_data : nil
+          )
+        end
+
         raise GenerationError.new(
           "相片未能生成有效 schema，請再試一次，或在文字提示補充各端子連接方式。",
           raw_output: raw_output,
