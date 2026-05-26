@@ -551,6 +551,7 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
         "Output one JSON object for a Hong Kong secondary-school circuit schema.",
         "Return JSON text only. Do not include markdown fences, prose, comments, or trailing explanation.",
         "The top-level object must include a components array. If the request is simple, still output every needed component and wire.",
+        "Each component must use exact coordinate fields x1, y1, x2, y2. Do not use p1, p2, point arrays, from/to, start/end, or nested coordinate objects.",
         "The JSON must use only these component types: wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter.",
         "Use components only. Do not output raw Falstad dump lines.",
         "All coordinates must be integers and multiples of 16.",
@@ -573,6 +574,7 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
         "請輸出一個香港中學物理電路用的 JSON schema。",
         "只輸出 JSON 文字。不要 markdown code fence，不要解釋，不要註解，不要在 JSON 後加任何文字。",
         "最外層 object 必須包含 components array。即使需求很簡單，也要輸出所有需要的元件和導線。",
+        "每個 component 必須使用精確欄位 x1、y1、x2、y2。不要使用 p1、p2、座標 array、from/to、start/end 或巢狀座標 object。",
         "JSON 只可使用這些元件類型：wire、battery、resistor、internal_resistance、variable_resistor、lamp、switch、ammeter、voltmeter。",
         "請只輸出 schema，不要輸出原始 Falstad dump 代碼。",
         "所有座標都必須是整數，而且一定要是 16 的倍數。",
@@ -606,6 +608,56 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
       response_mime_type: "application/json",
       response_schema: circuit_component_schema,
       thinking_level: compact ? "low" : "medium"
+    )
+  }
+end
+
+def build_circuit_schema_retry_payload(prompt_text, image_data_url, output_language, model, failed_output, error_message)
+  instruction_text =
+    if output_language.to_s == "en"
+      [
+        "Regenerate the Hong Kong secondary-school circuit schema as valid JSON.",
+        "The previous schema failed validation: #{error_message}",
+        "Output JSON only. No markdown fences, no prose, no comments.",
+        "The top-level object must contain components.",
+        "Every component must use x1, y1, x2, y2 numeric fields. Do not use p1, p2, coordinate arrays, from/to, start/end, or nested coordinate objects.",
+        "Use only these types: wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter.",
+        "All coordinates must be multiples of 16 and all normal components must be horizontal or vertical.",
+        "For the photo, trace only connected terminals and leads; ignore loose unused leads and background objects.",
+        "Do not output Falstad dump code."
+      ].join("\n")
+    else
+      [
+        "請重新生成香港中學物理電路 schema，並輸出有效 JSON。",
+        "上一個 schema 驗證失敗：#{error_message}",
+        "只輸出 JSON。不要 markdown code fence，不要解釋，不要註解。",
+        "最外層 object 必須包含 components。",
+        "每個 component 必須使用 x1、y1、x2、y2 數值欄位。不要使用 p1、p2、座標 array、from/to、start/end 或巢狀座標 object。",
+        "只可使用這些 type：wire、battery、resistor、internal_resistance、variable_resistor、lamp、switch、ammeter、voltmeter。",
+        "所有座標必須是 16 的倍數；一般元件必須水平或垂直。",
+        "如果是相片，只追蹤真正連接的端子與導線，忽略未接上的鬆散導線和背景物件。",
+        "不要輸出 Falstad dump code。"
+      ].join("\n")
+    end
+
+  failed_text = failed_output.to_s.strip
+  failed_text = failed_text[0, 3000] + "\n...[truncated]" if failed_text.length > 3000
+  retry_text = [instruction_text, "【Invalid previous output】", failed_text].join("\n\n")
+
+  {
+    "contents" => [
+      {
+        "role" => "user",
+        "parts" => build_task_parts(prompt_text, image_data_url, retry_text, output_language)
+      }
+    ],
+    "generationConfig" => build_generation_config(
+      model,
+      max_tokens: SCHEMA_MAX_OUTPUT_TOKENS,
+      temperature: 0,
+      response_mime_type: "application/json",
+      response_schema: circuit_component_schema,
+      thinking_level: "low"
     )
   }
 end
@@ -705,6 +757,43 @@ def bounded_ratio(value, default = 0.5)
   [[number, 0.05].max, 0.95].min
 end
 
+def coordinate_pair(value)
+  if value.is_a?(Array) && value.length >= 2
+    return [value[0], value[1]]
+  end
+
+  if value.is_a?(Hash)
+    keyed = value.transform_keys(&:to_s)
+    x = keyed["x"] || keyed["0"]
+    y = keyed["y"] || keyed["1"]
+    return [x, y] unless x.nil? || y.nil?
+  end
+
+  nil
+end
+
+def apply_schema_endpoint_aliases!(component)
+  endpoint_pairs = [
+    ["p1", "p2"],
+    ["from", "to"],
+    ["start", "end"]
+  ]
+
+  endpoint_pairs.each do |first_key, second_key|
+    first_pair = coordinate_pair(component[first_key])
+    second_pair = coordinate_pair(component[second_key])
+    next unless first_pair && second_pair
+
+    component["x1"] ||= first_pair[0]
+    component["y1"] ||= first_pair[1]
+    component["x2"] ||= second_pair[0]
+    component["y2"] ||= second_pair[1]
+    break
+  end
+
+  component
+end
+
 def component_midpoint(component)
   [
     ((component["x1"] + component["x2"]) / 2.0).round,
@@ -735,6 +824,7 @@ def normalize_schema_component(component, index)
   raise "第 #{index + 1} 個元件不是有效物件。" unless component.is_a?(Hash)
 
   normalized = component.transform_keys(&:to_s)
+  apply_schema_endpoint_aliases!(normalized)
   normalized["type"] = normalize_component_type(normalized["type"])
   raise "第 #{index + 1} 個元件缺少有效 type。" unless SUPPORTED_CIRCUIT_COMPONENT_TYPES.include?(normalized["type"])
 
@@ -834,14 +924,24 @@ def compile_course_schema_to_falstad(parsed_schema)
 end
 
 def generate_circuit_schema(prompt_text, image_data_url, output_language, api_key, model)
-  payloads = [
-    build_circuit_schema_payload(prompt_text, image_data_url, output_language, model, compact: false)
-  ]
-
-  status_code, data, model_used = perform_generation(payloads, api_key, model)
+  first_payload = build_circuit_schema_payload(prompt_text, image_data_url, output_language, model, compact: false)
+  status_code, data, model_used = perform_generation([first_payload], api_key, model)
   raw_text = extract_output_text(data)
-  parsed_schema = parse_circuit_schema_json(raw_text)
-  raw_output = append_named_raw_output("", "Circuit Schema", JSON.pretty_generate(parsed_schema))
+  raw_output = ""
+
+  begin
+    parsed_schema = parse_circuit_schema_json(raw_text)
+  rescue StandardError => first_error
+    raw_output = append_named_raw_output(raw_output, "Circuit Schema", build_raw_output(raw_text, data))
+    retry_payload = build_circuit_schema_retry_payload(prompt_text, image_data_url, output_language, model, raw_text, first_error.message)
+    status_code, data, model_used = perform_generation([retry_payload], api_key, model)
+    raw_text = extract_output_text(data)
+    parsed_schema = parse_circuit_schema_json(raw_text)
+    raw_output = append_named_raw_output(raw_output, "Circuit Schema Retry", JSON.pretty_generate(parsed_schema))
+  else
+    raw_output = append_named_raw_output(raw_output, "Circuit Schema", JSON.pretty_generate(parsed_schema))
+  end
+
   [status_code, data, parsed_schema, raw_output, model_used]
 rescue GenerationError => e
   raise GenerationError.new(
@@ -1060,6 +1160,15 @@ def execute_generate_task(task, prompt_text, image_data_url, output_language, fa
         else
           append_named_raw_output("", "Circuit Schema", schema_error.message)
         end
+
+      unless image_data_url.empty?
+        raise GenerationError.new(
+          "相片未能生成有效 schema，請再試一次，或在文字提示補充各端子連接方式。",
+          raw_output: raw_output,
+          status_code: schema_error.respond_to?(:status_code) ? schema_error.status_code : nil,
+          upstream_data: schema_error.respond_to?(:upstream_data) ? schema_error.upstream_data : nil
+        )
+      end
 
       raw_output = append_named_raw_output(raw_output, "Schema Fallback", "Schema compiler failed, so the server retried direct Falstad generation.")
 
