@@ -25,6 +25,7 @@ const translations = {
     generateCircuitButton: "生成電路代碼",
     generateGuideButton: "生成教學指引",
     generateTutorButton: "生成解題教學",
+    stopGenerationButton: "停止生成",
     exampleButton: "載入示例",
     helperText: "先用 Step 2 生成與修改 Falstad 專用代碼；代碼成功後，再分開生成教學指引與解題教學。",
     step2Label: "Step 2",
@@ -79,6 +80,8 @@ const translations = {
       generatingCircuit: "本地後端正在請求 AI 生成 Falstad 專用代碼...",
       generatingGuide: "本地後端正在根據 Falstad 代碼生成教學指引...",
       generatingTutor: "本地後端正在根據 Falstad 代碼生成引導式解題教學...",
+      canceling: "正在停止目前生成...",
+      canceled: "生成已停止。",
       generatedCircuit: "Falstad 專用代碼已生成，可直接修改 Step 2，或載入右側模擬器。",
       generatedGuide: "教學指引已生成，可配合右側模擬器帶學生觀察。",
       generatedTutor: "引導式解題教學已生成，可作為課堂提問流程草稿。",
@@ -118,6 +121,7 @@ const translations = {
     generateCircuitButton: "Generate Circuit",
     generateGuideButton: "Generate Guide",
     generateTutorButton: "Generate Tutor",
+    stopGenerationButton: "Stop",
     exampleButton: "Load Example",
     helperText:
       "Generate and refine the Falstad code first. After the circuit is ready, generate the teaching guide and tutoring script separately.",
@@ -173,6 +177,8 @@ const translations = {
       generatingCircuit: "The local backend is asking the AI to generate Falstad code...",
       generatingGuide: "The local backend is generating a teaching guide from the Falstad code...",
       generatingTutor: "The local backend is generating a guided tutoring draft from the Falstad code...",
+      canceling: "Stopping the current generation...",
+      canceled: "Generation stopped.",
       generatedCircuit: "Falstad code is ready. You can edit Step 2 directly or load it into the simulator.",
       generatedGuide: "The teaching guide is ready for classroom observation and discussion.",
       generatedTutor: "The guided tutoring draft is ready to use as a lesson flow.",
@@ -217,6 +223,7 @@ const els = {
   generateCircuitButton: document.getElementById("generateCircuitButton"),
   generateGuideButton: document.getElementById("generateGuideButton"),
   generateTutorButton: document.getElementById("generateTutorButton"),
+  stopGenerationButton: document.getElementById("stopGenerationButton"),
   exampleButton: document.getElementById("exampleButton"),
   feedbackText: document.getElementById("feedbackText"),
   apiStatus: document.getElementById("apiStatus"),
@@ -263,6 +270,9 @@ let falstadSim = null;
 let simulatorPollTimer = null;
 let currentFeedbackKey = "helperText";
 let currentLoadingTask = null;
+let activeJobId = "";
+let stopRequested = false;
+let activeRequestController = null;
 const JOB_POLL_INTERVAL_MS = 2000;
 const JOB_POLL_MAX_ATTEMPTS = 240;
 
@@ -274,6 +284,7 @@ els.exampleButton.addEventListener("click", fillExample);
 els.generateCircuitButton.addEventListener("click", () => runGenerationTask("circuit"));
 els.generateGuideButton.addEventListener("click", () => runGenerationTask("guide"));
 els.generateTutorButton.addEventListener("click", () => runGenerationTask("tutor"));
+els.stopGenerationButton.addEventListener("click", stopGenerationTask);
 els.copyCodeButton.addEventListener("click", () => copyText(els.falstadCode.value, t("feedback.copiedCode")));
 els.copyGuideButton.addEventListener("click", () => copyText(els.teachingGuide.value, t("feedback.copiedGuide")));
 els.copyTutorButton.addEventListener("click", () => copyText(els.tutorOutput.value, t("feedback.copiedTutor")));
@@ -308,6 +319,7 @@ function renderLanguage() {
   els.imageLabel.textContent = t("imageLabel");
   els.removeImageButton.textContent = t("removeImageButton");
   refreshActionButtons();
+  els.stopGenerationButton.textContent = t("stopGenerationButton");
   els.exampleButton.textContent = t("exampleButton");
   els.step2Label.textContent = t("step2Label");
   els.codeSectionTitle.textContent = t("codeSectionTitle");
@@ -492,6 +504,9 @@ async function runGenerationTask(task) {
   }
 
   setLoadingState(task, true);
+  stopRequested = false;
+  activeJobId = "";
+  activeRequestController = new AbortController();
   setFeedback(t(`feedback.generating${capitalizeTask(task)}`), false);
   clearTaskOutputs(task);
 
@@ -508,6 +523,7 @@ async function runGenerationTask(task) {
         outputLanguage: currentLanguage,
         falstadCode,
       }),
+      signal: activeRequestController.signal,
     });
 
     const startPayload = await startResponse.json().catch(() => ({}));
@@ -518,9 +534,16 @@ async function runGenerationTask(task) {
       throw error;
     }
 
-    const payload = await pollGenerationJob(startPayload.job_id);
+    activeJobId = startPayload.job_id || "";
+    const payload = await pollGenerationJob(activeJobId);
     const rawOutput = payload.raw_output || "";
     els.rawAiOutput.value = rawOutput;
+
+    if (payload.status === "canceled") {
+      setFeedback(t("feedback.canceled"), false);
+      setApiStatus("idle");
+      return;
+    }
 
     if (task === "circuit") {
       els.falstadCode.value = normalizeGeneratedText(payload.falstad_code, true);
@@ -535,6 +558,12 @@ async function runGenerationTask(task) {
     setFeedback(t(`feedback.generated${capitalizeTask(task)}`), false);
     setApiStatus("success");
   } catch (error) {
+    if (stopRequested || error?.name === "AbortError") {
+      setFeedback(t("feedback.canceled"), false);
+      setApiStatus("idle");
+      return;
+    }
+
     console.error(error);
     if (!els.rawAiOutput.value && error.rawOutput) {
       els.rawAiOutput.value = error.rawOutput;
@@ -542,6 +571,9 @@ async function runGenerationTask(task) {
     setFeedback(`${t("feedback.generateFailed")}${translateBackendError(readableErrorMessage(error))}`, true);
     setApiStatus("error");
   } finally {
+    activeJobId = "";
+    activeRequestController = null;
+    stopRequested = false;
     setLoadingState(task, false);
   }
 }
@@ -556,7 +588,15 @@ async function pollGenerationJob(jobId) {
   }
 
   for (let attempt = 0; attempt < JOB_POLL_MAX_ATTEMPTS; attempt += 1) {
+    if (stopRequested) {
+      return { status: "canceled" };
+    }
+
     await wait(attempt === 0 ? 0 : JOB_POLL_INTERVAL_MS);
+
+    if (stopRequested) {
+      return { status: "canceled" };
+    }
 
     const response = await fetch(APP_CONFIG.generateEndpoint, {
       method: "POST",
@@ -564,6 +604,7 @@ async function pollGenerationJob(jobId) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ jobId }),
+      signal: activeRequestController?.signal,
     });
 
     const payload = await response.json().catch(() => ({}));
@@ -582,6 +623,10 @@ async function pollGenerationJob(jobId) {
       return payload;
     }
 
+    if (payload.status === "canceled") {
+      return payload;
+    }
+
     if (payload.status === "failed") {
       const error = new Error(payload.error || "生成工作失敗。");
       error.rawOutput = payload.raw_output || "";
@@ -590,6 +635,43 @@ async function pollGenerationJob(jobId) {
   }
 
   throw new Error("生成工作等待逾時，請稍後再試。");
+}
+
+async function stopGenerationTask() {
+  if (!currentLoadingTask) {
+    return;
+  }
+
+  stopRequested = true;
+  els.stopGenerationButton.disabled = true;
+  setFeedback(t("feedback.canceling"), false);
+
+  if (activeRequestController) {
+    activeRequestController.abort();
+  }
+
+  if (!activeJobId) {
+    setFeedback(t("feedback.canceled"), false);
+    setApiStatus("idle");
+    setLoadingState(currentLoadingTask, false);
+    return;
+  }
+
+  try {
+    await fetch(APP_CONFIG.generateEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ cancelJobId: activeJobId }),
+    });
+  } catch (error) {
+    console.warn("Unable to cancel the backend job.", error);
+  }
+
+  setFeedback(t("feedback.canceled"), false);
+  setApiStatus("idle");
+  setLoadingState(currentLoadingTask, false);
 }
 
 function translateBackendError(message) {
@@ -665,6 +747,8 @@ function setLoadingState(task, isLoading) {
   els.generateCircuitButton.disabled = isLoading;
   els.generateGuideButton.disabled = isLoading;
   els.generateTutorButton.disabled = isLoading;
+  els.stopGenerationButton.classList.toggle("hidden", !isLoading);
+  els.stopGenerationButton.disabled = !isLoading;
   refreshActionButtons();
   if (isLoading) {
     setApiStatus("loading");

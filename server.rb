@@ -30,6 +30,11 @@ SUPPORTED_CIRCUIT_COMPONENT_TYPES = %w[
   voltmeter
 ].freeze
 FALSTAD_HEADER = "$ 1 0.000005 10.20027730826997 50 5 43"
+PHOTO_LAYOUT_ORIGIN_X = 96
+PHOTO_LAYOUT_ORIGIN_Y = 64
+PHOTO_LAYOUT_WIDTH = 800
+PHOTO_LAYOUT_HEIGHT = 640
+GRID_SIZE = 16
 
 class GenerationError < StandardError
   attr_reader :raw_output, :status_code, :upstream_data
@@ -85,10 +90,16 @@ def circuit_component_schema
             "id" => { "type" => "string" },
             "label" => { "type" => "string" },
             "type" => { "type" => "string", "enum" => SUPPORTED_CIRCUIT_COMPONENT_TYPES },
-            "x1" => { "type" => "integer" },
-            "y1" => { "type" => "integer" },
-            "x2" => { "type" => "integer" },
-            "y2" => { "type" => "integer" },
+            "x1" => { "type" => "number" },
+            "y1" => { "type" => "number" },
+            "x2" => { "type" => "number" },
+            "y2" => { "type" => "number" },
+            "bbox" => {
+              "type" => "array",
+              "items" => { "type" => "number" }
+            },
+            "orientation" => { "type" => "string", "enum" => %w[horizontal vertical] },
+            "terminals" => { "type" => "object" },
             "wiper_x" => { "type" => "integer" },
             "wiper_y" => { "type" => "integer" },
             "voltage" => { "type" => "number" },
@@ -97,11 +108,14 @@ def circuit_component_schema
             "position" => { "type" => "number" },
             "state" => { "type" => "string", "enum" => %w[open closed] }
           },
-          "required" => ["type", "x1", "y1", "x2", "y2"],
+          "required" => ["type"],
           "propertyOrdering" => [
             "id",
             "label",
             "type",
+            "bbox",
+            "orientation",
+            "terminals",
             "x1",
             "y1",
             "x2",
@@ -507,7 +521,9 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
         "Output one JSON object for a Hong Kong secondary-school circuit schema.",
         "Return JSON text only. Do not include markdown fences, prose, comments, or trailing explanation.",
         "The top-level object must include a components array. If the request is simple, still output every needed component and wire.",
-        "Each component must use exact coordinate fields x1, y1, x2, y2. Do not use p1, p2, point arrays, from/to, start/end, or nested coordinate objects.",
+        "For real photos, prefer photo-layout coordinates: use normalized decimals from 0 to 1 relative to the photo, preserving the photographed positions. The server will snap them to the Falstad grid.",
+        "For each real photographed component, provide bbox [left, top, right, bottom], orientation, and either x1/y1/x2/y2 terminal coordinates or terminals {a:[x,y], b:[x,y]}.",
+        "Use x1/y1/x2/y2 for the two electrical terminals. These can be normalized photo coordinates for photos or 16-grid Falstad coordinates for text-only requests.",
         "The JSON must use only these component types: wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter.",
         "Use components only. Do not output raw Falstad dump lines.",
         "All coordinates must be integers and multiples of 16.",
@@ -530,7 +546,9 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
         "請輸出一個香港中學物理電路用的 JSON schema。",
         "只輸出 JSON 文字。不要 markdown code fence，不要解釋，不要註解，不要在 JSON 後加任何文字。",
         "最外層 object 必須包含 components array。即使需求很簡單，也要輸出所有需要的元件和導線。",
-        "每個 component 必須使用精確欄位 x1、y1、x2、y2。不要使用 p1、p2、座標 array、from/to、start/end 或巢狀座標 object。",
+        "如果是真實相片，請優先使用 photo-layout coordinates：用 0 至 1 的小數表示相對於相片的位置，保留相片中的相對擺位；server 會自動 snap 到 Falstad 格線。",
+        "每個相片中的實物 component 請提供 bbox [left, top, right, bottom]、orientation，以及 x1/y1/x2/y2 端子座標或 terminals {a:[x,y], b:[x,y]}。",
+        "x1/y1/x2/y2 代表兩個電氣端子。相片可用 0 至 1 normalized 座標；純文字需求可用 16 倍數 Falstad 座標。",
         "JSON 只可使用這些元件類型：wire、battery、resistor、internal_resistance、variable_resistor、lamp、switch、ammeter、voltmeter。",
         "請只輸出 schema，不要輸出原始 Falstad dump 代碼。",
         "所有座標都必須是整數，而且一定要是 16 的倍數。",
@@ -576,9 +594,10 @@ def build_circuit_schema_retry_payload(prompt_text, image_data_url, output_langu
         "The previous schema failed validation: #{error_message}",
         "Output JSON only. No markdown fences, no prose, no comments.",
         "The top-level object must contain components.",
-        "Every component must use x1, y1, x2, y2 numeric fields. Do not use p1, p2, coordinate arrays, from/to, start/end, or nested coordinate objects.",
+        "For photos, preserve photographed positions using normalized 0-to-1 coordinates. Prefer bbox [left, top, right, bottom], orientation, and terminal coordinates x1/y1/x2/y2 or terminals {a:[x,y], b:[x,y]}.",
+        "x1/y1/x2/y2 are the two electrical terminals. Use normalized photo coordinates or 16-grid Falstad coordinates.",
         "Use only these types: wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter.",
-        "All coordinates must be multiples of 16 and all normal components must be horizontal or vertical.",
+        "All compiled components must be horizontal or vertical. The server will snap normalized photo coordinates to multiples of 16.",
         "For the photo, trace only connected terminals and leads; ignore loose unused leads and background objects.",
         "Do not output Falstad dump code."
       ].join("\n")
@@ -588,9 +607,10 @@ def build_circuit_schema_retry_payload(prompt_text, image_data_url, output_langu
         "上一個 schema 驗證失敗：#{error_message}",
         "只輸出 JSON。不要 markdown code fence，不要解釋，不要註解。",
         "最外層 object 必須包含 components。",
-        "每個 component 必須使用 x1、y1、x2、y2 數值欄位。不要使用 p1、p2、座標 array、from/to、start/end 或巢狀座標 object。",
+        "如果是相片，請用 0 至 1 normalized 座標保留相片擺位。優先提供 bbox [left, top, right, bottom]、orientation，以及 x1/y1/x2/y2 或 terminals {a:[x,y], b:[x,y]} 端子座標。",
+        "x1/y1/x2/y2 代表兩個電氣端子。可用 normalized 相片座標或 16 倍數 Falstad 座標。",
         "只可使用這些 type：wire、battery、resistor、internal_resistance、variable_resistor、lamp、switch、ammeter、voltmeter。",
-        "所有座標必須是 16 的倍數；一般元件必須水平或垂直。",
+        "編譯後的元件必須水平或垂直；server 會把 normalized 相片座標 snap 到 16 倍數。",
         "如果是相片，只追蹤真正連接的端子與導線，忽略未接上的鬆散導線和背景物件。",
         "不要輸出 Falstad dump code。"
       ].join("\n")
@@ -694,13 +714,22 @@ def parse_circuit_schema_json(raw_text)
   parsed
 end
 
-def integer_coordinate!(value, key)
-  integer = Integer(value)
-  raise "#{key} 必須是 16 的倍數。" unless (integer % 16).zero?
+def snap_to_grid(value)
+  ((value.to_f / GRID_SIZE).round * GRID_SIZE).to_i
+end
 
-  integer
+def schema_coordinate!(value, key)
+  number = Float(value)
+  if number >= 0.0 && number <= 1.0
+    axis = key.to_s.include?("x") ? :x : :y
+    base = axis == :x ? PHOTO_LAYOUT_ORIGIN_X : PHOTO_LAYOUT_ORIGIN_Y
+    span = axis == :x ? PHOTO_LAYOUT_WIDTH : PHOTO_LAYOUT_HEIGHT
+    return snap_to_grid(base + (number * span))
+  end
+
+  snap_to_grid(number)
 rescue ArgumentError, TypeError
-  raise "#{key} 必須是整數。"
+  raise "#{key} 必須是數值座標。"
 end
 
 def positive_number(value, default)
@@ -728,11 +757,67 @@ def coordinate_pair(value)
   nil
 end
 
+def terminal_pair_from_component(component)
+  terminals = component["terminals"]
+  return nil unless terminals.is_a?(Hash)
+
+  keyed = terminals.transform_keys { |key| key.to_s.downcase }
+  key_pairs = [
+    %w[a b],
+    %w[t1 t2],
+    %w[terminal1 terminal2],
+    %w[positive negative],
+    %w[plus minus],
+    %w[red black],
+    %w[left right],
+    %w[top bottom]
+  ]
+
+  key_pairs.each do |first_key, second_key|
+    first_pair = coordinate_pair(keyed[first_key])
+    second_pair = coordinate_pair(keyed[second_key])
+    return [first_pair, second_pair] if first_pair && second_pair
+  end
+
+  pairs = keyed.values.map { |value| coordinate_pair(value) }.compact
+  pairs.length >= 2 ? pairs.first(2) : nil
+end
+
+def endpoint_pair_from_bbox(component)
+  bbox = component["bbox"]
+  return nil unless bbox.is_a?(Array) && bbox.length >= 4
+
+  left, top, right, bottom = bbox.first(4).map(&:to_f)
+  left, right = [left, right].minmax
+  top, bottom = [top, bottom].minmax
+  center_x = (left + right) / 2.0
+  center_y = (top + bottom) / 2.0
+  width = right - left
+  height = bottom - top
+
+  orientation = component["orientation"].to_s.downcase
+  orientation = width >= height ? "horizontal" : "vertical" unless %w[horizontal vertical].include?(orientation)
+
+  if orientation == "vertical"
+    [[center_x, top], [center_x, bottom]]
+  else
+    [[left, center_y], [right, center_y]]
+  end
+end
+
 def apply_schema_endpoint_aliases!(component)
   endpoint_pairs = [
     ["p1", "p2"],
     ["from", "to"],
-    ["start", "end"]
+    ["start", "end"],
+    ["terminal1", "terminal2"],
+    ["t1", "t2"],
+    ["a", "b"],
+    ["positive", "negative"],
+    ["plus", "minus"],
+    ["red", "black"],
+    ["left", "right"],
+    ["top", "bottom"]
   ]
 
   endpoint_pairs.each do |first_key, second_key|
@@ -745,6 +830,40 @@ def apply_schema_endpoint_aliases!(component)
     component["x2"] ||= second_pair[0]
     component["y2"] ||= second_pair[1]
     break
+  end
+
+  terminal_pair = terminal_pair_from_component(component)
+  if terminal_pair
+    component["x1"] ||= terminal_pair[0][0]
+    component["y1"] ||= terminal_pair[0][1]
+    component["x2"] ||= terminal_pair[1][0]
+    component["y2"] ||= terminal_pair[1][1]
+  end
+
+  bbox_pair = endpoint_pair_from_bbox(component)
+  if bbox_pair
+    component["x1"] ||= bbox_pair[0][0]
+    component["y1"] ||= bbox_pair[0][1]
+    component["x2"] ||= bbox_pair[1][0]
+    component["y2"] ||= bbox_pair[1][1]
+  end
+
+  component
+end
+
+def orthogonalize_component!(component)
+  return component if component["type"] == "variable_resistor"
+  return component if component["x1"] == component["x2"] || component["y1"] == component["y2"]
+
+  orientation = component["orientation"].to_s.downcase
+  unless %w[horizontal vertical].include?(orientation)
+    orientation = (component["x2"] - component["x1"]).abs >= (component["y2"] - component["y1"]).abs ? "horizontal" : "vertical"
+  end
+
+  if orientation == "vertical"
+    component["x2"] = component["x1"]
+  else
+    component["y2"] = component["y1"]
   end
 
   component
@@ -785,8 +904,10 @@ def normalize_schema_component(component, index)
   raise "第 #{index + 1} 個元件缺少有效 type。" unless SUPPORTED_CIRCUIT_COMPONENT_TYPES.include?(normalized["type"])
 
   %w[x1 y1 x2 y2].each do |key|
-    normalized[key] = integer_coordinate!(normalized[key], "元件 #{index + 1} 的 #{key}")
+    normalized[key] = schema_coordinate!(normalized[key], "元件 #{index + 1} 的 #{key}")
   end
+
+  orthogonalize_component!(normalized)
 
   if normalized["type"] != "variable_resistor" && normalized["x1"] != normalized["x2"] && normalized["y1"] != normalized["y2"]
     raise "元件 #{index + 1}（#{normalized["type"]}）必須保持水平或垂直。"
@@ -798,11 +919,11 @@ def normalize_schema_component(component, index)
     end
 
     if normalized["y1"] == normalized["y2"]
-      normalized["wiper_x"] = integer_coordinate!(normalized["wiper_x"] || ((normalized["x1"] + normalized["x2"]) / 2), "元件 #{index + 1} 的 wiper_x")
-      normalized["wiper_y"] = integer_coordinate!(normalized["wiper_y"], "元件 #{index + 1} 的 wiper_y")
+      normalized["wiper_x"] = schema_coordinate!(normalized["wiper_x"] || ((normalized["x1"] + normalized["x2"]) / 2), "元件 #{index + 1} 的 wiper_x")
+      normalized["wiper_y"] = schema_coordinate!(normalized["wiper_y"], "元件 #{index + 1} 的 wiper_y")
     else
-      normalized["wiper_x"] = integer_coordinate!(normalized["wiper_x"], "元件 #{index + 1} 的 wiper_x")
-      normalized["wiper_y"] = integer_coordinate!(normalized["wiper_y"] || ((normalized["y1"] + normalized["y2"]) / 2), "元件 #{index + 1} 的 wiper_y")
+      normalized["wiper_x"] = schema_coordinate!(normalized["wiper_x"], "元件 #{index + 1} 的 wiper_x")
+      normalized["wiper_y"] = schema_coordinate!(normalized["wiper_y"] || ((normalized["y1"] + normalized["y2"]) / 2), "元件 #{index + 1} 的 wiper_y")
     end
   end
 
@@ -1059,6 +1180,7 @@ def generate_plain_text_task(payload, api_key, model)
 end
 
 JOBS = {}
+JOB_THREADS = {}
 JOBS_MUTEX = Mutex.new
 
 def cleanup_jobs_locked
@@ -1086,10 +1208,48 @@ def store_job(job_id, payload)
   end
 end
 
+def register_job_thread(job_id, thread)
+  JOBS_MUTEX.synchronize do
+    return if %w[completed failed canceled].include?(JOBS.dig(job_id, "status"))
+    return unless thread&.alive?
+
+    JOB_THREADS[job_id] = thread
+  end
+end
+
+def unregister_job_thread(job_id)
+  JOBS_MUTEX.synchronize do
+    JOB_THREADS.delete(job_id)
+  end
+end
+
 def fetch_job(job_id)
   JOBS_MUTEX.synchronize do
     job = JOBS[job_id]
     job && job.dup
+  end
+end
+
+def job_canceled?(job_id)
+  JOBS_MUTEX.synchronize do
+    JOBS.dig(job_id, "status") == "canceled"
+  end
+end
+
+def cancel_job(job_id)
+  JOBS_MUTEX.synchronize do
+    job = JOBS[job_id]
+    return nil unless job
+
+    unless %w[completed failed canceled].include?(job["status"])
+      job["status"] = "canceled"
+      job["error"] = "生成已停止。"
+      job["updated_at"] = Time.now.to_i
+    end
+
+    thread = JOB_THREADS.delete(job_id)
+    thread&.kill if thread&.alive?
+    job.dup
   end
 end
 
@@ -1271,6 +1431,19 @@ server.mount_proc "/api/generate" do |req, res|
   raw_output = ""
   begin
     request_body = JSON.parse(req.body)
+    cancel_job_id = request_body["cancelJobId"].to_s.strip
+
+    unless cancel_job_id.empty?
+      job = cancel_job(cancel_job_id)
+
+      if job.nil?
+        json_response(res, status: 404, body: { error: "找不到這個生成工作，請重新開始。" })
+      else
+        json_response(res, status: 200, body: job)
+      end
+      next
+    end
+
     job_id = request_body["jobId"].to_s.strip
 
     unless job_id.empty?
@@ -1302,14 +1475,22 @@ server.mount_proc "/api/generate" do |req, res|
       }
     )
 
-    Thread.new do
+    worker = Thread.new do
       Thread.current.report_on_exception = false if Thread.current.respond_to?(:report_on_exception=)
+      next if job_canceled?(job_id)
+
       store_job(job_id, { "status" => "running" })
 
       begin
+        next if job_canceled?(job_id)
+
         result = execute_generate_task(task, prompt_text, image_data_url, output_language, falstad_code_input, api_key, config["poe_model"])
+        next if job_canceled?(job_id)
+
         store_job(job_id, result.merge("job_id" => job_id, "status" => "completed"))
       rescue JSON::ParserError
+        next if job_canceled?(job_id)
+
         store_job(
           job_id,
           {
@@ -1321,6 +1502,8 @@ server.mount_proc "/api/generate" do |req, res|
           }
         )
       rescue GenerationError => e
+        next if job_canceled?(job_id)
+
         store_job(
           job_id,
           {
@@ -1332,6 +1515,8 @@ server.mount_proc "/api/generate" do |req, res|
           }
         )
       rescue StandardError => e
+        next if job_canceled?(job_id)
+
         store_job(
           job_id,
           {
@@ -1342,8 +1527,12 @@ server.mount_proc "/api/generate" do |req, res|
             "raw_output" => ""
           }
         )
+      ensure
+        unregister_job_thread(job_id)
       end
     end
+
+    register_job_thread(job_id, worker)
 
     json_response(
       res,

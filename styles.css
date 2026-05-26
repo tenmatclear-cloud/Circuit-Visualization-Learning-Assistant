@@ -263,7 +263,8 @@ button:hover {
 }
 
 .primary-button,
-.ghost-button {
+.ghost-button,
+.danger-button {
   border-radius: 999px;
   padding: 12px 18px;
   font-weight: 700;
@@ -281,13 +282,20 @@ button:hover {
   border: 1px solid rgba(29, 45, 53, 0.12);
 }
 
+.danger-button {
+  background: #b3261e;
+  color: #fff;
+  box-shadow: 0 14px 30px rgba(179, 38, 30, 0.22);
+}
+
 .ghost-button.small {
   padding: 9px 14px;
   font-size: 0.92rem;
 }
 
 .ghost-button:disabled,
-.primary-button:disabled {
+.primary-button:disabled,
+.danger-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   transform: none;
