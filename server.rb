@@ -12,6 +12,7 @@ ROOT = Pathname.new(__dir__)
 CONFIG_PATH = ROOT.join("server-config.local.json")
 POE_CHAT_COMPLETIONS_ENDPOINT = URI("https://api.poe.com/v1/chat/completions")
 MAX_OUTPUT_TOKENS = 8_192
+SCHEMA_MAX_OUTPUT_TOKENS = 4_096
 CURL_RETRY_ATTEMPTS = 3
 API_STATUS_RETRY_ATTEMPTS = 3
 JOB_RETENTION_SECONDS = 3600
@@ -43,7 +44,7 @@ end
 def load_config
   config = {
     "poe_api_key" => nil,
-    "poe_model" => "gemini-3.1-flash-lite",
+    "poe_model" => "gemini-3.1-pro",
     "port" => 8080
   }
 
@@ -435,7 +436,7 @@ def request_poe_via_curl(payload, api_key, model)
       "@-",
       "-w",
       "\n%{http_code}",
-      stdin_data: JSON.generate(payload)
+      stdin_data: JSON.generate(poe_payload_from_generation_payload(payload, model))
     )
 
     if status.success?
@@ -548,6 +549,8 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
     if output_language.to_s == "en"
       [
         "Output one JSON object for a Hong Kong secondary-school circuit schema.",
+        "Return JSON text only. Do not include markdown fences, prose, comments, or trailing explanation.",
+        "The top-level object must include a components array. If the request is simple, still output every needed component and wire.",
         "The JSON must use only these component types: wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter.",
         "Use components only. Do not output raw Falstad dump lines.",
         "All coordinates must be integers and multiples of 16.",
@@ -568,6 +571,8 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
     else
       [
         "請輸出一個香港中學物理電路用的 JSON schema。",
+        "只輸出 JSON 文字。不要 markdown code fence，不要解釋，不要註解，不要在 JSON 後加任何文字。",
+        "最外層 object 必須包含 components array。即使需求很簡單，也要輸出所有需要的元件和導線。",
         "JSON 只可使用這些元件類型：wire、battery、resistor、internal_resistance、variable_resistor、lamp、switch、ammeter、voltmeter。",
         "請只輸出 schema，不要輸出原始 Falstad dump 代碼。",
         "所有座標都必須是整數，而且一定要是 16 的倍數。",
@@ -596,7 +601,7 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
     ],
     "generationConfig" => build_generation_config(
       model,
-      max_tokens: MAX_OUTPUT_TOKENS,
+      max_tokens: SCHEMA_MAX_OUTPUT_TOKENS,
       temperature: 0,
       response_mime_type: "application/json",
       response_schema: circuit_component_schema,
@@ -611,6 +616,8 @@ def build_circuit_code_payload(prompt_text, image_data_url, output_language, mod
     output_language.to_s == "en" ? "Output only plain Falstad code. No JSON, no markdown, no explanations." : "只輸出 Falstad 純文字代碼，不要 JSON，不要 markdown，不要解釋。",
     output_language.to_s == "en" ? "Every X and Y coordinate must be a multiple of 16." : "所有 X 與 Y 座標都必須是 16 的倍數。",
     output_language.to_s == "en" ? "Use legal Falstad elements only. Use 6V or 9V batteries when needed." : "只使用合法的 Falstad 元件；如需要電池，請用 6V 或 9V。",
+    output_language.to_s == "en" ? "Never use shorthand element lines. Use these exact formats: battery `v x1 y1 x2 y2 0 0 40 voltage 0 0 0.5`; switch `s x1 y1 x2 y2 0 position false`; resistor `r x1 y1 x2 y2 0 resistance`; wire `w x1 y1 x2 y2 0`." : "絕不可使用簡寫元件行。請使用這些完整格式：電池 `v x1 y1 x2 y2 0 0 40 voltage 0 0 0.5`；開關 `s x1 y1 x2 y2 0 position false`；電阻 `r x1 y1 x2 y2 0 resistance`；導線 `w x1 y1 x2 y2 0`。",
+    output_language.to_s == "en" ? "For example, a 9V battery must be `v 160 240 160 160 0 0 40 9 0 0 0.5`, not `v 160 240 160 160 0 9`." : "例如 9V 電池必須寫成 `v 160 240 160 160 0 0 40 9 0 0 0.5`，不可寫成 `v 160 240 160 160 0 9`。",
     output_language.to_s == "en" ? "If you use an ammeter, use Falstad ammeter code with the circular symbol enabled. If you use a voltmeter, use the circular voltmeter/probe symbol and a high resistance so it behaves like a meter in class diagrams." : "如果使用安培計，請使用帶圓形符號的 Falstad ammeter 代碼；如果使用伏特計，請使用帶圓形符號的 voltmeter/probe，並設定高電阻，使其符合課堂圖示與理想伏特計用途。",
     output_language.to_s == "en" ? "Do not add x text labels, arrows, callouts, or decorative helper lines unless the user explicitly asks for them." : "除非使用者明確要求，否則不要加入 x 文字標示、箭頭、指示線或裝飾性輔助圖形。",
     compact ? (output_language.to_s == "en" ? "Prefer the simplest valid layout that preserves the intended topology." : "請優先使用最簡潔、但仍保留原始拓撲的有效佈局。") : (output_language.to_s == "en" ? "Preserve the intended topology faithfully and keep the layout tidy." : "請忠實保留原有拓撲，並保持佈局整齊。"),
@@ -674,6 +681,7 @@ def parse_circuit_schema_json(raw_text)
   candidate = extract_json_candidate(normalized) || normalized
   parsed = JSON.parse(candidate)
   raise "AI 沒有回傳元件 schema。" unless parsed.is_a?(Hash)
+  raise "AI 沒有回傳任何元件。" if Array(parsed["components"] || parsed[:components]).empty?
 
   parsed
 end
@@ -827,8 +835,7 @@ end
 
 def generate_circuit_schema(prompt_text, image_data_url, output_language, api_key, model)
   payloads = [
-    build_circuit_schema_payload(prompt_text, image_data_url, output_language, model, compact: false),
-    build_circuit_schema_payload(prompt_text, image_data_url, output_language, model, compact: true)
+    build_circuit_schema_payload(prompt_text, image_data_url, output_language, model, compact: false)
   ]
 
   status_code, data, model_used = perform_generation(payloads, api_key, model)
@@ -847,7 +854,43 @@ end
 
 def clean_falstad_code(text)
   cleaned_chunk, _marker = strip_continuation_marker(normalize_model_field(text, preserve_newlines: true))
-  cleaned_chunk
+  normalize_falstad_dump_lines(cleaned_chunk)
+end
+
+def finalize_falstad_code(emitted_code, raw_output)
+  raw_code, _marker = strip_continuation_marker(normalize_model_field(emitted_code, preserve_newlines: true))
+  final_code = normalize_falstad_dump_lines(raw_code)
+
+  if !final_code.empty? && final_code != raw_code
+    raw_output = append_named_raw_output(raw_output, "Normalized Falstad Code", final_code)
+  end
+
+  [final_code, raw_output]
+end
+
+def normalize_falstad_dump_lines(code)
+  code.to_s.split("\n").map do |line|
+    stripped = line.strip
+    parts = stripped.split(/\s+/)
+
+    case parts.first
+    when "v"
+      if parts.length == 7
+        voltage = positive_number(parts[6], 9)
+        "v #{parts[1]} #{parts[2]} #{parts[3]} #{parts[4]} 0 0 40 #{voltage} 0 0 0.5"
+      else
+        stripped
+      end
+    when "s"
+      if parts.length == 7
+        "#{stripped} false"
+      else
+        stripped
+      end
+    else
+      stripped
+    end
+  end.join("\n").strip
 end
 
 def generate_circuit_code(prompt_text, image_data_url, output_language, api_key, model)
@@ -870,10 +913,16 @@ def generate_circuit_code(prompt_text, image_data_url, output_language, api_key,
     emitted_code = merge_code_chunks(emitted_code, cleaned_chunk)
     finish_reasons = upstream_finish_reasons(data)
 
-    return [200, data, clean_falstad_code(emitted_code), raw_output, model_used] if marker == :end
+    if marker == :end
+      final_code, raw_output = finalize_falstad_code(emitted_code, raw_output)
+      return [200, data, final_code, raw_output, model_used]
+    end
+
     next if marker == :continue
     next if finish_reasons.any? { |reason| %w[MAX_TOKENS length].include?(reason.to_s) } && !cleaned_chunk.empty?
-    return [200, data, clean_falstad_code(emitted_code), raw_output, model_used] unless clean_falstad_code(emitted_code).empty?
+
+    final_code, raw_output = finalize_falstad_code(emitted_code, raw_output)
+    return [200, data, final_code, raw_output, model_used] unless final_code.empty?
   end
 
   raise GenerationError.new(truncation_error_message, raw_output: raw_output)
@@ -994,7 +1043,26 @@ def execute_generate_task(task, prompt_text, image_data_url, output_language, fa
     raise "請提供文字需求或圖片。" if prompt_text.empty? && image_data_url.empty?
 
     raw_output = ""
-    if image_data_url.empty?
+    begin
+      status_code, upstream_data, parsed_schema, schema_raw_output, model_used = generate_circuit_schema(
+        prompt_text,
+        image_data_url,
+        output_language,
+        api_key,
+        model
+      )
+      falstad_code_text = compile_course_schema_to_falstad(parsed_schema)
+      raw_output = append_named_raw_output(schema_raw_output, "Compiled Falstad Code", falstad_code_text)
+    rescue StandardError => schema_error
+      raw_output =
+        if schema_error.is_a?(GenerationError)
+          schema_error.raw_output.to_s
+        else
+          append_named_raw_output("", "Circuit Schema", schema_error.message)
+        end
+
+      raw_output = append_named_raw_output(raw_output, "Schema Fallback", "Schema compiler failed, so the server retried direct Falstad generation.")
+
       begin
         status_code, upstream_data, falstad_code_text, direct_raw_output, model_used = generate_circuit_code(
           prompt_text,
@@ -1003,63 +1071,19 @@ def execute_generate_task(task, prompt_text, image_data_url, output_language, fa
           api_key,
           model
         )
-        raw_output = append_named_raw_output(raw_output, "Direct Falstad", direct_raw_output)
+        raw_output = append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_raw_output)
       rescue GenerationError => direct_error
         raise GenerationError.new(
           direct_error.message,
-          raw_output: append_named_raw_output(raw_output, "Direct Falstad", direct_error.raw_output),
+          raw_output: append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_error.raw_output),
           status_code: direct_error.status_code,
           upstream_data: direct_error.upstream_data
         )
       rescue StandardError => direct_error
         raise GenerationError.new(
           direct_error.message,
-          raw_output: append_named_raw_output(raw_output, "Direct Falstad", direct_error.message)
+          raw_output: append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_error.message)
         )
-      end
-    else
-      begin
-        status_code, upstream_data, parsed_schema, schema_raw_output, model_used = generate_circuit_schema(
-          prompt_text,
-          image_data_url,
-          output_language,
-          api_key,
-          model
-        )
-        falstad_code_text = compile_course_schema_to_falstad(parsed_schema)
-        raw_output = append_named_raw_output(schema_raw_output, "Compiled Falstad Code", falstad_code_text)
-      rescue StandardError => schema_error
-        raw_output =
-          if schema_error.is_a?(GenerationError)
-            schema_error.raw_output.to_s
-          else
-            append_named_raw_output("", "Circuit Schema", schema_error.message)
-          end
-
-        raw_output = append_named_raw_output(raw_output, "Schema Fallback", "Schema compiler failed, so the server retried direct Falstad generation.")
-
-        begin
-          status_code, upstream_data, falstad_code_text, direct_raw_output, model_used = generate_circuit_code(
-            prompt_text,
-            image_data_url,
-            output_language,
-            api_key,
-            model
-          )
-          raw_output = append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_raw_output)
-        rescue GenerationError => direct_error
-          raise GenerationError.new(
-            direct_error.message,
-            raw_output: append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_error.raw_output),
-            status_code: direct_error.status_code,
-            upstream_data: direct_error.upstream_data
-          )
-        rescue StandardError => direct_error
-          raise GenerationError.new(
-            direct_error.message,
-            raw_output: append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_error.message)
-          )
-        end
       end
     end
 
@@ -1068,7 +1092,7 @@ def execute_generate_task(task, prompt_text, image_data_url, output_language, fa
       raise GenerationError.new(error_message, raw_output: raw_output, status_code: status_code, upstream_data: upstream_data)
     end
 
-    falstad_code = normalize_model_field(falstad_code_text, preserve_newlines: true)
+    falstad_code, raw_output = finalize_falstad_code(falstad_code_text, raw_output)
     raise "AI 沒有回傳 Falstad 代碼，請再試一次。" if falstad_code.empty?
 
     {

@@ -44,7 +44,7 @@
 ```json
 {
   "poe_api_key": "PASTE_YOUR_POE_API_KEY_HERE",
-  "poe_model": "gemini-3.1-flash-lite",
+  "poe_model": "gemini-3.1-pro",
   "port": 8080
 }
 ```
@@ -52,7 +52,7 @@
 說明：
 
 - `poe_api_key`: 你的 Poe API key，可在 `https://poe.com/api/keys` 建立
-- `poe_model`: 你要使用的 Poe model id，例如 `gemini-3.1-flash-lite`
+- `poe_model`: 你要使用的 Poe model id，例如 `gemini-3.1-pro`
 - `port`: 本地 server port，預設 `8080`
 
 不要把真正 API key commit 到 GitHub。
@@ -124,7 +124,7 @@ http://localhost:8080
   "task": "circuit",
   "status": "completed",
   "falstad_code": "...",
-  "model_used": "gemini-3.1-flash-lite",
+  "model_used": "gemini-3.1-pro",
   "raw_output": "..."
 }
 ```
@@ -146,7 +146,7 @@ http://localhost:8080
 
 ```txt
 POE_API_KEY=你的 Poe API key
-POE_MODEL=gemini-3.1-flash-lite
+POE_MODEL=gemini-3.1-pro
 HOST=0.0.0.0
 PORT=10000
 ```
