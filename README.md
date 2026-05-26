@@ -5,7 +5,7 @@
 ## 主要功能
 
 - 雙語前端介面：繁體中文 / English
-- Google Gemini 後端代理，API key 不會暴露在瀏覽器
+- Poe API 後端代理，API key 不會暴露在瀏覽器
 - 文字需求及電路圖片上載
 - `Generate Circuit`：生成 Falstad 專用代碼
 - `Generate Guide`：根據已生成代碼輸出視覺化教學指引
@@ -19,7 +19,7 @@
 
 網站已由早期的 planner / formatter 雙階段，簡化為更穩定的三段式流程：
 
-1. Gemini 先把文字或圖片轉成「香港中學物理課程元件 schema」
+1. Poe 上的 Gemini model 先把文字或圖片轉成「香港中學物理課程元件 schema」
 2. Ruby 後端把 schema 本地編譯成 Falstad code
 3. 如果 schema 失敗，後端才 fallback 到直接 Falstad code 生成
 
@@ -30,7 +30,7 @@
 - `index.html`: 主畫面
 - `styles.css`: 視覺樣式
 - `app.js`: 前端互動、圖片壓縮、雙語切換、Falstad 載入、Raw AI Output 顯示
-- `server.rb`: Ruby 後端代理、Gemini 呼叫、schema compiler、背景生成工作
+- `server.rb`: Ruby 後端代理、Poe API 呼叫、schema compiler、背景生成工作
 - `server-config.local.json`: 本地開發用 API key / model / port 設定
 - `serve.command`: 一鍵啟動本地 server
 - `falstad/`: 右側 iframe 真正使用的 CircuitJS1 runtime
@@ -43,16 +43,16 @@
 
 ```json
 {
-  "google_api_key": "PASTE_YOUR_API_KEY_HERE",
-  "google_model": "gemini-3-flash",
+  "poe_api_key": "PASTE_YOUR_POE_API_KEY_HERE",
+  "poe_model": "gemini-3.1-flash-lite",
   "port": 8080
 }
 ```
 
 說明：
 
-- `google_api_key`: 你的 Google AI Studio / Gemini API key
-- `google_model`: 你要使用的模型，例如 `gemini-3-flash`
+- `poe_api_key`: 你的 Poe API key，可在 `https://poe.com/api/keys` 建立
+- `poe_model`: 你要使用的 Poe model id，例如 `gemini-3.1-flash-lite`
 - `port`: 本地 server port，預設 `8080`
 
 不要把真正 API key commit 到 GitHub。
@@ -124,7 +124,7 @@ http://localhost:8080
   "task": "circuit",
   "status": "completed",
   "falstad_code": "...",
-  "model_used": "gemini-3-flash",
+  "model_used": "gemini-3.1-flash-lite",
   "raw_output": "..."
 }
 ```
@@ -145,8 +145,8 @@ http://localhost:8080
 4. 在 Render `Environment` 加入：
 
 ```txt
-GOOGLE_API_KEY=你的 Gemini API key
-GOOGLE_MODEL=gemini-3-flash
+POE_API_KEY=你的 Poe API key
+POE_MODEL=gemini-3.1-flash-lite
 HOST=0.0.0.0
 PORT=10000
 ```
@@ -164,7 +164,7 @@ PORT=10000
 - voltmeter 會編譯成 Falstad 圓形 voltmeter / probe
 - 燈泡使用 Falstad lamp 元件，不再只用普通 resistor 代替
 - 圖片上載會壓縮到較高解析度，保留更多導線與儀器細節
-- Gemini `503 high demand` / `UNAVAILABLE` 會自動重試
+- Poe API 暫時性錯誤、rate limit 或上游模型繁忙時會自動重試
 - 長時間生成改用背景 job + polling，避免 Render 或瀏覽器中途切斷
 - 顯示 `Raw AI Output`，方便看到 schema、compiled code 或 fallback 原因
 - 自動把字面 `\\n` 還原成真正換行，避免 Falstad 匯入失敗
@@ -475,7 +475,7 @@ w 416 224 128 224 0
 
 常見內容包括：
 
-- `[Circuit Schema]`: Gemini 輸出的課程元件 schema
+- `[Circuit Schema]`: Poe model 輸出的課程元件 schema
 - `[Compiled Falstad Code]`: Ruby compiler 轉出的 Falstad code
 - `[Schema Fallback]`: schema 失敗時的 fallback 說明
 - `[Direct Falstad Fallback]`: 直接生成 Falstad code 的模型輸出
@@ -483,7 +483,7 @@ w 416 224 128 224 0
 
 ## Chatbot 直接測試 Prompt
 
-你可以把以下 prompt 貼到 Gemini chatbot，再上載一張電路圖或輸入文字需求，測試模型是否能先穩定輸出 schema。
+你可以把以下 prompt 貼到 Poe / Gemini chatbot，再上載一張電路圖或輸入文字需求，測試模型是否能先穩定輸出 schema。
 
 ```txt
 你是香港中學物理電路視覺化助手。你的任務不是解題，而是把我提供的文字需求或電路圖片，轉成一個可由程式編譯成 Falstad / CircuitJS 電路的「課程元件 schema」。

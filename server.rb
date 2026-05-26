@@ -10,7 +10,7 @@ require "net/http"
 
 ROOT = Pathname.new(__dir__)
 CONFIG_PATH = ROOT.join("server-config.local.json")
-GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+POE_CHAT_COMPLETIONS_ENDPOINT = URI("https://api.poe.com/v1/chat/completions")
 MAX_OUTPUT_TOKENS = 65_536
 CURL_RETRY_ATTEMPTS = 3
 API_STATUS_RETRY_ATTEMPTS = 3
@@ -42,8 +42,8 @@ end
 
 def load_config
   defaults = {
-    "google_api_key" => ENV["GEMINI_API_KEY"] || ENV["GOOGLE_API_KEY"],
-    "google_model" => ENV.fetch("GOOGLE_MODEL", "gemini-3-flash"),
+    "poe_api_key" => ENV["POE_API_KEY"],
+    "poe_model" => ENV.fetch("POE_MODEL", "gemini-3.1-flash-lite"),
     "port" => ENV.fetch("PORT", "8080").to_i
   }
 
@@ -119,21 +119,17 @@ def user_request_label(prompt_text, output_language)
   output_language.to_s == "en" ? "The user uploaded an image without additional text instructions." : "使用者只上載了圖片，沒有提供文字說明。"
 end
 
-def thinking_config_for(model, level)
-  return nil unless model.to_s.start_with?("gemini-3")
+def thinking_level_for(model, level)
+  return nil unless model.to_s.start_with?("gemini-")
 
-  normalized_level =
-    if model.to_s.include?("flash")
-      %w[minimal low medium high].include?(level) ? level : "high"
-    else
-      %w[low high].include?(level) ? level : "high"
-    end
-
-  {
-    "thinkingConfig" => {
-      "thinkingLevel" => normalized_level
-    }
-  }
+  case level.to_s
+  when "minimal", "low", "high"
+    level.to_s
+  when "medium"
+    "high"
+  else
+    "low"
+  end
 end
 
 def build_generation_config(model, max_tokens:, temperature:, response_mime_type: nil, response_schema: nil, thinking_level: nil)
@@ -145,14 +141,26 @@ def build_generation_config(model, max_tokens:, temperature:, response_mime_type
   config["responseMimeType"] = response_mime_type if response_mime_type
   config["responseSchema"] = response_schema if response_schema
 
-  thinking_config = thinking_config_for(model, thinking_level)
-  config.merge!(thinking_config) if thinking_config
+  normalized_thinking_level = thinking_level_for(model, thinking_level)
+  config["thinkingLevel"] = normalized_thinking_level if normalized_thinking_level
 
   config
 end
 
 def extract_output_text(data)
   fragments = []
+  Array(data["choices"]).each do |choice|
+    content = choice.dig("message", "content")
+    if content.is_a?(String) && !content.strip.empty?
+      fragments << content
+    elsif content.is_a?(Array)
+      content.each do |part|
+        text = part["text"]
+        fragments << text if text.is_a?(String) && !text.strip.empty?
+      end
+    end
+  end
+
   Array(data["candidates"]).each do |candidate|
     Array(candidate.dig("content", "parts")).each do |part|
       text = part["text"]
@@ -181,9 +189,14 @@ def truncated_json_output?(text)
   !normalized.end_with?("}") || extract_json_candidate(normalized).nil?
 end
 
+def upstream_finish_reasons(data)
+  Array(data["choices"]).map { |choice| choice["finish_reason"] }.compact +
+    Array(data["candidates"]).map { |candidate| candidate["finishReason"] }.compact
+end
+
 def response_truncated?(data)
-  finish_reasons = Array(data["candidates"]).filter_map { |candidate| candidate["finishReason"] }
-  return true if finish_reasons.include?("MAX_TOKENS")
+  finish_reasons = upstream_finish_reasons(data)
+  return true if finish_reasons.any? { |reason| %w[MAX_TOKENS length].include?(reason.to_s) }
 
   truncated_json_output?(extract_output_text(data))
 end
@@ -306,19 +319,67 @@ def transport_error?(error)
 end
 
 def retryable_upstream_status?(status_code, data)
-  return false unless [429, 500, 503, 504].include?(status_code.to_i)
+  return false unless [408, 429, 500, 502, 503, 504, 529].include?(status_code.to_i)
 
   upstream_status = data.dig("error", "status").to_s
-  upstream_status.empty? || %w[UNAVAILABLE RESOURCE_EXHAUSTED INTERNAL DEADLINE_EXCEEDED].include?(upstream_status)
+  upstream_type = data.dig("error", "type").to_s
+  upstream_status.empty? ||
+    %w[UNAVAILABLE RESOURCE_EXHAUSTED INTERNAL DEADLINE_EXCEEDED].include?(upstream_status) ||
+    %w[timeout_error rate_limit_error provider_error upstream_error overloaded_error].include?(upstream_type)
 end
 
-def gemini_endpoint_for(model)
-  URI("#{GEMINI_API_BASE}/#{model}:generateContent")
+def poe_content_from_parts(parts)
+  content_parts = []
+
+  Array(parts).each do |part|
+    text = part["text"]
+    content_parts << { "type" => "text", "text" => text } if text.is_a?(String) && !text.strip.empty?
+
+    inline_data = part["inline_data"]
+    next unless inline_data.is_a?(Hash)
+
+    mime_type = inline_data["mime_type"].to_s
+    data = inline_data["data"].to_s
+    next if mime_type.empty? || data.empty?
+
+    content_parts << {
+      "type" => "image_url",
+      "image_url" => {
+        "url" => "data:#{mime_type};base64,#{data}"
+      }
+    }
+  end
+
+  return "" if content_parts.empty?
+  return content_parts.first["text"] if content_parts.length == 1 && content_parts.first["type"] == "text"
+
+  content_parts
 end
 
-def request_gemini_via_net_http(payload, api_key, model)
+def poe_payload_from_generation_payload(payload, model)
+  generation_config = payload["generationConfig"] || {}
+  messages = Array(payload["contents"]).map do |content|
+    role = content["role"].to_s == "model" ? "assistant" : "user"
+    {
+      "role" => role,
+      "content" => poe_content_from_parts(content["parts"])
+    }
+  end
+
+  request_payload = {
+    "model" => model,
+    "messages" => messages,
+    "temperature" => generation_config["temperature"],
+    "max_tokens" => generation_config["maxOutputTokens"],
+    "thinking_level" => generation_config["thinkingLevel"]
+  }
+
+  request_payload.delete_if { |_key, value| value.nil? || value == "" }
+end
+
+def request_poe_via_net_http(payload, api_key, model)
   Timeout.timeout(60) do
-    endpoint = gemini_endpoint_for(model)
+    endpoint = POE_CHAT_COMPLETIONS_ENDPOINT
     http = Net::HTTP.new(endpoint.host, endpoint.port)
     http.use_ssl = true
     http.open_timeout = 20
@@ -326,18 +387,18 @@ def request_gemini_via_net_http(payload, api_key, model)
     http.keep_alive_timeout = 0
 
     upstream_req = Net::HTTP::Post.new(endpoint)
-    upstream_req["x-goog-api-key"] = api_key
+    upstream_req["Authorization"] = "Bearer #{api_key}"
     upstream_req["Content-Type"] = "application/json"
     upstream_req["Connection"] = "close"
-    upstream_req.body = JSON.generate(payload)
+    upstream_req.body = JSON.generate(poe_payload_from_generation_payload(payload, model))
 
     upstream_res = http.request(upstream_req)
     [upstream_res.code.to_i, upstream_res.body]
   end
 end
 
-def request_gemini_via_curl(payload, api_key, model)
-  endpoint = gemini_endpoint_for(model).to_s
+def request_poe_via_curl(payload, api_key, model)
+  endpoint = POE_CHAT_COMPLETIONS_ENDPOINT.to_s
   last_error = nil
 
   CURL_RETRY_ATTEMPTS.times do |index|
@@ -360,7 +421,7 @@ def request_gemini_via_curl(payload, api_key, model)
       "-H",
       "Connection: close",
       "-H",
-      "x-goog-api-key: #{api_key}",
+      "Authorization: Bearer #{api_key}",
       "-H",
       "Content-Type: application/json",
       "--data-binary",
@@ -372,24 +433,24 @@ def request_gemini_via_curl(payload, api_key, model)
 
     if status.success?
       body, http_code = stdout.sub(/\n(\d{3})\z/, ""), stdout[/\n(\d{3})\z/, 1]
-      raise "無法判斷 Google API 回應狀態。" unless http_code
+      raise "無法判斷 Poe API 回應狀態。" unless http_code
 
       return [http_code.to_i, body]
     end
 
-    last_error = stderr.strip.empty? ? "Google API 連線中斷。" : stderr.strip
+    last_error = stderr.strip.empty? ? "Poe API 連線中斷。" : stderr.strip
     sleep(index + 1) if index < CURL_RETRY_ATTEMPTS - 1
   end
 
-  raise last_error || "Google API 連線失敗。"
+  raise last_error || "Poe API 連線失敗。"
 end
 
-def request_gemini(payload, api_key, model)
-  request_gemini_via_net_http(payload, api_key, model)
+def request_poe(payload, api_key, model)
+  request_poe_via_net_http(payload, api_key, model)
 rescue StandardError => e
   raise unless transport_error?(e) || e.message.include?("end of file reached")
 
-  request_gemini_via_curl(payload, api_key, model)
+  request_poe_via_curl(payload, api_key, model)
 end
 
 def perform_generation(payloads, api_key, preferred_model)
@@ -398,7 +459,7 @@ def perform_generation(payloads, api_key, preferred_model)
   payloads.each do |payload|
     API_STATUS_RETRY_ATTEMPTS.times do |attempt|
       begin
-        status_code, body = request_gemini(payload, api_key, preferred_model)
+        status_code, body = request_poe(payload, api_key, preferred_model)
         parsed = JSON.parse(body)
 
         if status_code.between?(200, 299) && response_truncated?(parsed)
@@ -425,7 +486,7 @@ def perform_generation(payloads, api_key, preferred_model)
   end
 
   raise last_error if last_error
-  raise "Google API 請求失敗。"
+  raise "Poe API 請求失敗。"
 end
 
 def build_task_parts(prompt_text, image_data_url, instruction_text, output_language, include_request_label: true)
@@ -455,7 +516,7 @@ def perform_generation_relaxed(payloads, api_key, preferred_model)
   payloads.each do |payload|
     API_STATUS_RETRY_ATTEMPTS.times do |attempt|
       begin
-        status_code, body = request_gemini(payload, api_key, preferred_model)
+        status_code, body = request_poe(payload, api_key, preferred_model)
         parsed = JSON.parse(body)
 
         if retryable_upstream_status?(status_code, parsed) && attempt < API_STATUS_RETRY_ATTEMPTS - 1
@@ -472,7 +533,7 @@ def perform_generation_relaxed(payloads, api_key, preferred_model)
   end
 
   raise last_error if last_error
-  raise "Google API 請求失敗。"
+  raise "Poe API 請求失敗。"
 end
 
 def build_circuit_schema_payload(prompt_text, image_data_url, output_language, model, compact: false)
@@ -800,11 +861,11 @@ def generate_circuit_code(prompt_text, image_data_url, output_language, api_key,
     raw_output = append_named_raw_output(raw_output, "Circuit chunk #{index + 1}", build_raw_output(chunk_text, data))
     cleaned_chunk, marker = strip_continuation_marker(chunk_text)
     emitted_code = merge_code_chunks(emitted_code, cleaned_chunk)
-    finish_reasons = Array(data["candidates"]).filter_map { |candidate| candidate["finishReason"] }
+    finish_reasons = upstream_finish_reasons(data)
 
     return [200, data, clean_falstad_code(emitted_code), raw_output, model_used] if marker == :end
     next if marker == :continue
-    next if finish_reasons.include?("MAX_TOKENS") && !cleaned_chunk.empty?
+    next if finish_reasons.any? { |reason| %w[MAX_TOKENS length].include?(reason.to_s) } && !cleaned_chunk.empty?
     return [200, data, clean_falstad_code(emitted_code), raw_output, model_used] unless clean_falstad_code(emitted_code).empty?
   end
 
@@ -1058,9 +1119,9 @@ server.mount_proc "/api/health" do |_req, res|
     status: 200,
     body: {
       ok: true,
-      provider: "google-gemini-api",
-      has_api_key: !config["google_api_key"].to_s.empty? && config["google_api_key"] != "PASTE_YOUR_API_KEY_HERE",
-      model: config["google_model"]
+      provider: "poe-api",
+      has_api_key: !config["poe_api_key"].to_s.empty? && config["poe_api_key"] != "PASTE_YOUR_POE_API_KEY_HERE",
+      model: config["poe_model"]
     }
   )
 end
@@ -1071,9 +1132,9 @@ server.mount_proc "/api/generate" do |req, res|
     next
   end
 
-  api_key = config["google_api_key"].to_s
-  if api_key.empty? || api_key == "PASTE_YOUR_API_KEY_HERE"
-    json_response(res, status: 500, body: { error: "請先在 server-config.local.json 填入 Google AI Studio / Gemini API key。" })
+  api_key = config["poe_api_key"].to_s
+  if api_key.empty? || api_key == "PASTE_YOUR_POE_API_KEY_HERE"
+    json_response(res, status: 500, body: { error: "請先在 server-config.local.json 填入 Poe API key。" })
     next
   end
 
@@ -1116,7 +1177,7 @@ server.mount_proc "/api/generate" do |req, res|
       store_job(job_id, { "status" => "running" })
 
       begin
-        result = execute_generate_task(task, prompt_text, image_data_url, output_language, falstad_code_input, api_key, config["google_model"])
+        result = execute_generate_task(task, prompt_text, image_data_url, output_language, falstad_code_input, api_key, config["poe_model"])
         store_job(job_id, result.merge("job_id" => job_id, "status" => "completed"))
       rescue JSON::ParserError
         store_job(
