@@ -11,7 +11,7 @@ require "net/http"
 ROOT = Pathname.new(__dir__)
 CONFIG_PATH = ROOT.join("server-config.local.json")
 POE_CHAT_COMPLETIONS_ENDPOINT = URI("https://api.poe.com/v1/chat/completions")
-MAX_OUTPUT_TOKENS = 65_536
+MAX_OUTPUT_TOKENS = 8_192
 CURL_RETRY_ATTEMPTS = 3
 API_STATUS_RETRY_ATTEMPTS = 3
 JOB_RETENTION_SECONDS = 3600
@@ -994,26 +994,7 @@ def execute_generate_task(task, prompt_text, image_data_url, output_language, fa
     raise "請提供文字需求或圖片。" if prompt_text.empty? && image_data_url.empty?
 
     raw_output = ""
-    begin
-      status_code, upstream_data, parsed_schema, schema_raw_output, model_used = generate_circuit_schema(
-        prompt_text,
-        image_data_url,
-        output_language,
-        api_key,
-        model
-      )
-      falstad_code_text = compile_course_schema_to_falstad(parsed_schema)
-      raw_output = append_named_raw_output(schema_raw_output, "Compiled Falstad Code", falstad_code_text)
-    rescue StandardError => schema_error
-      raw_output =
-        if schema_error.is_a?(GenerationError)
-          schema_error.raw_output.to_s
-        else
-          append_named_raw_output("", "Circuit Schema", schema_error.message)
-        end
-
-      raw_output = append_named_raw_output(raw_output, "Schema Fallback", "Schema compiler failed, so the server retried direct Falstad generation.")
-
+    if image_data_url.empty?
       begin
         status_code, upstream_data, falstad_code_text, direct_raw_output, model_used = generate_circuit_code(
           prompt_text,
@@ -1022,19 +1003,63 @@ def execute_generate_task(task, prompt_text, image_data_url, output_language, fa
           api_key,
           model
         )
-        raw_output = append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_raw_output)
+        raw_output = append_named_raw_output(raw_output, "Direct Falstad", direct_raw_output)
       rescue GenerationError => direct_error
         raise GenerationError.new(
           direct_error.message,
-          raw_output: append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_error.raw_output),
+          raw_output: append_named_raw_output(raw_output, "Direct Falstad", direct_error.raw_output),
           status_code: direct_error.status_code,
           upstream_data: direct_error.upstream_data
         )
       rescue StandardError => direct_error
         raise GenerationError.new(
           direct_error.message,
-          raw_output: append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_error.message)
+          raw_output: append_named_raw_output(raw_output, "Direct Falstad", direct_error.message)
         )
+      end
+    else
+      begin
+        status_code, upstream_data, parsed_schema, schema_raw_output, model_used = generate_circuit_schema(
+          prompt_text,
+          image_data_url,
+          output_language,
+          api_key,
+          model
+        )
+        falstad_code_text = compile_course_schema_to_falstad(parsed_schema)
+        raw_output = append_named_raw_output(schema_raw_output, "Compiled Falstad Code", falstad_code_text)
+      rescue StandardError => schema_error
+        raw_output =
+          if schema_error.is_a?(GenerationError)
+            schema_error.raw_output.to_s
+          else
+            append_named_raw_output("", "Circuit Schema", schema_error.message)
+          end
+
+        raw_output = append_named_raw_output(raw_output, "Schema Fallback", "Schema compiler failed, so the server retried direct Falstad generation.")
+
+        begin
+          status_code, upstream_data, falstad_code_text, direct_raw_output, model_used = generate_circuit_code(
+            prompt_text,
+            image_data_url,
+            output_language,
+            api_key,
+            model
+          )
+          raw_output = append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_raw_output)
+        rescue GenerationError => direct_error
+          raise GenerationError.new(
+            direct_error.message,
+            raw_output: append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_error.raw_output),
+            status_code: direct_error.status_code,
+            upstream_data: direct_error.upstream_data
+          )
+        rescue StandardError => direct_error
+          raise GenerationError.new(
+            direct_error.message,
+            raw_output: append_named_raw_output(raw_output, "Direct Falstad Fallback", direct_error.message)
+          )
+        end
       end
     end
 
