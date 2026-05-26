@@ -41,16 +41,23 @@ class GenerationError < StandardError
 end
 
 def load_config
-  defaults = {
-    "poe_api_key" => ENV["POE_API_KEY"],
-    "poe_model" => ENV.fetch("POE_MODEL", "gemini-3.1-flash-lite"),
-    "port" => ENV.fetch("PORT", "8080").to_i
+  config = {
+    "poe_api_key" => nil,
+    "poe_model" => "gemini-3.1-flash-lite",
+    "port" => 8080
   }
 
-  return defaults unless CONFIG_PATH.exist?
+  if CONFIG_PATH.exist?
+    file_config = JSON.parse(CONFIG_PATH.read)
+    config.merge!(file_config)
+  end
 
-  file_config = JSON.parse(CONFIG_PATH.read)
-  defaults.merge(file_config)
+  config["poe_api_key"] = nil if config["poe_api_key"].to_s == "PASTE_YOUR_POE_API_KEY_HERE"
+  config["poe_api_key"] = ENV["POE_API_KEY"] if ENV["POE_API_KEY"].to_s.strip != ""
+  config["poe_model"] = ENV["POE_MODEL"] if ENV["POE_MODEL"].to_s.strip != ""
+  config["port"] = ENV["PORT"].to_i if ENV["PORT"].to_s.strip != ""
+
+  config
 end
 
 def parse_data_url(data_url)
