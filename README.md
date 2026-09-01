@@ -32,7 +32,7 @@
 - `app.js`: 前端互動、圖片壓縮、雙語切換、Falstad 載入、Raw AI Output 顯示
 - `server.rb`: Ruby 後端代理、Poe API 呼叫、schema compiler、背景生成工作
 - `server-config.local.json`: 本地開發用 API key / model / port 設定
-- `serve.command`: 一鍵啟動本地 server
+- `examples.md`: 左側「串聯／並聯示例」的文字，改完重新整理即可
 - `falstad/`: 右側 iframe 真正使用的 CircuitJS1 runtime
 - `vendor/circuitjs1-source/`: CircuitJS1 GitHub source snapshot
 - `Dockerfile`, `Gemfile`, `.dockerignore`: Render / Docker 部署用檔案

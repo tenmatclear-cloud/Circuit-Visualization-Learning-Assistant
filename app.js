@@ -9,8 +9,9 @@ const APP_CONFIG = {
     "zh-Hant": "/circuit/circuitjs-zh-tw.html?lang=zh-tw&startCircuit=blank.txt&whiteBackground=false",
     en: "/circuit/circuitjs.html?lang=en&startCircuit=blank.txt&whiteBackground=false",
   },
-  teachingCurrentSpeed: 45,
-  teachingFalstadHeader: "$ 1 0.000005 10.20027730826997 45 5 43",
+  teachingCurrentSpeed: 42,
+  teachingFalstadHeader: "$ 1 0.000005 10.20027730826997 42 5 43",
+  examplesEndpoint: "/examples.md",
 };
 
 const translations = {
@@ -21,7 +22,7 @@ const translations = {
     step1Label: "開始",
     inputSectionTitle: "輸入需求",
     promptLabel: "文字需求",
-    promptPlaceholder: "例如：請設計一個由兩個電阻組成的串聯電路，並加入一個短路變形圖供比較。",
+    promptPlaceholder: "例如：請設計一個由兩個燈泡組成的串聯電路。",
     promptModePill: "使用文字",
     clearPromptButton: "清除文字",
     imageLabel: "電路圖圖片（可選）",
@@ -31,7 +32,6 @@ const translations = {
     generateGuideButton: "生成教學指引",
     generateTutorButton: "生成解題教學",
     stopGenerationButton: "停止生成",
-    exampleButton: "載入示例",
     helperText: "輸入需求或上載題目圖片，按「生成電路」。電路會自動出現在右側，可直接觀察電流與電壓。",
     step2Label: "進階",
     codeSectionTitle: "電路代碼",
@@ -115,8 +115,6 @@ const translations = {
       simulatorExported: "已把右側電路匯出到進階代碼框",
       simulatorExportFailed: "匯出失敗。",
     },
-    examplePrompt:
-      "請設計一個簡單電路：包含一個 9V 電池、一個開關，以及兩個串聯的電阻。佈局要清晰，方便學生觀察電流路徑與電壓變化。除非必要，請不要加入文字標籤。",
   },
   en: {
     heroEyebrow: "Series / Parallel Learning Studio",
@@ -127,7 +125,7 @@ const translations = {
     inputSectionTitle: "Input Request",
     promptLabel: "Text Request",
     promptPlaceholder:
-      "Example: Design a circuit with two resistors in series, and include one short-circuit variation for comparison.",
+      "Example: Design a circuit with two lamps in series.",
     promptModePill: "Using text",
     clearPromptButton: "Clear text",
     imageLabel: "Circuit Image (Optional)",
@@ -137,7 +135,6 @@ const translations = {
     generateGuideButton: "Generate Guide",
     generateTutorButton: "Generate Tutor",
     stopGenerationButton: "Stop",
-    exampleButton: "Load Example",
     helperText:
       "Enter a request or upload a question image, then click Generate Circuit. The circuit will appear on the right so you can watch current and voltage.",
     step2Label: "Advanced",
@@ -222,8 +219,6 @@ const translations = {
       simulatorExported: "The current circuit has been exported to the advanced code box.",
       simulatorExportFailed: "Export failed.",
     },
-    examplePrompt:
-      "Please design a simple circuit with one 9V battery, one switch, and two resistors in series. Keep the layout clear so students can observe current flow and voltage changes. Avoid text labels unless they are truly necessary.",
   },
 };
 
@@ -251,7 +246,7 @@ const els = {
   generateGuideButton: document.getElementById("generateGuideButton"),
   generateTutorButton: document.getElementById("generateTutorButton"),
   stopGenerationButton: document.getElementById("stopGenerationButton"),
-  exampleButton: document.getElementById("exampleButton"),
+  exampleButtons: document.getElementById("exampleButtons"),
   feedbackText: document.getElementById("feedbackText"),
   apiStatus: document.getElementById("apiStatus"),
   step2Label: document.getElementById("step2Label"),
@@ -323,6 +318,7 @@ let generationSessionId = 0;
 let healthBannerKey = "";
 let isPresenting = false;
 let pendingConnectDefaults = false;
+let exampleLibrary = [];
 const JOB_POLL_INTERVAL_MS = 2000;
 const JOB_POLL_MAX_ATTEMPTS = 150;
 const JOB_POLL_NETWORK_RETRIES = 3;
@@ -333,7 +329,12 @@ els.imageInput.addEventListener("change", handleImageUpload);
 els.removeImageButton.addEventListener("click", clearImage);
 els.clearPromptButton.addEventListener("click", clearPrompt);
 els.userPrompt.addEventListener("input", syncInputModes);
-els.exampleButton.addEventListener("click", fillExample);
+els.exampleButtons.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-example-id]");
+  if (button) {
+    fillExample(button.dataset.exampleId);
+  }
+});
 els.generateCircuitButton.addEventListener("click", () => runGenerationTask("circuit"));
 els.generateGuideButton.addEventListener("click", (event) => {
   preventSummaryToggle(event);
@@ -418,7 +419,7 @@ function renderLanguage() {
   syncInputModes();
   refreshActionButtons();
   els.stopGenerationButton.textContent = t("stopGenerationButton");
-  els.exampleButton.textContent = t("exampleButton");
+  renderExampleButtons();
   els.step2Label.textContent = t("step2Label");
   els.codeSectionTitle.textContent = t("codeSectionTitle");
   els.copyCodeButton.textContent = t("copyCodeButton");
@@ -467,9 +468,83 @@ function renderLanguage() {
   }
 }
 
-function fillExample() {
-  els.userPrompt.value = t("examplePrompt");
+function parseExampleMarkdown(markdown) {
+  return String(markdown || "")
+    .replace(/\r\n/g, "\n")
+    .split(/^##\s+/m)
+    .slice(1)
+    .map((section) => {
+      const newline = section.indexOf("\n");
+      const header = (newline === -1 ? section : section.slice(0, newline)).trim();
+      const body = newline === -1 ? "" : section.slice(newline + 1);
+      const [id, zhLabel, enLabel] = header.split("|").map((part) => part.trim());
+      if (!id) {
+        return null;
+      }
+
+      return {
+        id,
+        labels: {
+          "zh-Hant": zhLabel || id,
+          en: enLabel || zhLabel || id,
+        },
+        prompts: {
+          "zh-Hant": extractExampleLanguage(body, "zh"),
+          en: extractExampleLanguage(body, "en"),
+        },
+      };
+    })
+    .filter((item) => item && (item.prompts["zh-Hant"] || item.prompts.en));
+}
+
+function extractExampleLanguage(body, language) {
+  const match = String(body || "").match(
+    new RegExp(`^###\\s*${language}\\s*\\n([\\s\\S]*?)(?=^###\\s|$)`, "im")
+  );
+  return match ? match[1].trim() : "";
+}
+
+function renderExampleButtons() {
+  if (!els.exampleButtons) {
+    return;
+  }
+
+  els.exampleButtons.replaceChildren();
+  exampleLibrary.forEach((example) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ghost-button small";
+    button.dataset.exampleId = example.id;
+    button.textContent = example.labels[currentLanguage] || example.labels["zh-Hant"] || example.id;
+    els.exampleButtons.append(button);
+  });
+}
+
+function fillExample(exampleId) {
+  const example = exampleLibrary.find((item) => item.id === exampleId) || exampleLibrary[0];
+  const prompt = example?.prompts?.[currentLanguage] || example?.prompts?.["zh-Hant"] || "";
+  if (!prompt) {
+    return;
+  }
+
+  els.userPrompt.value = prompt;
   syncInputModes();
+}
+
+async function loadExamples() {
+  try {
+    const response = await fetch(`${APP_CONFIG.examplesEndpoint}?t=${Date.now()}`);
+    if (!response.ok) {
+      throw new Error(`Unable to load examples (${response.status})`);
+    }
+
+    exampleLibrary = parseExampleMarkdown(await response.text());
+  } catch (error) {
+    console.warn("Unable to load examples.md", error);
+    exampleLibrary = [];
+  }
+
+  renderExampleButtons();
 }
 
 function clearPrompt() {
@@ -1272,3 +1347,4 @@ setSimulatorStatus("waiting");
 setFeedback(t("helperText"), false, "helperText");
 syncSimulatorLanguage();
 checkBackendHealth();
+loadExamples();

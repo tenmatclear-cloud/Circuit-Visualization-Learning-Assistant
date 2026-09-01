@@ -33,7 +33,7 @@ SUPPORTED_CIRCUIT_COMPONENT_TYPES = %w[
   ammeter
   voltmeter
 ].freeze
-FALSTAD_HEADER = "$ 1 0.000005 10.20027730826997 45 5 43"
+FALSTAD_HEADER = "$ 1 0.000005 10.20027730826997 42 5 43"
 PHOTO_LAYOUT_ORIGIN_X = 96
 PHOTO_LAYOUT_ORIGIN_Y = 64
 PHOTO_LAYOUT_WIDTH = 800
@@ -1360,6 +1360,21 @@ server.mount(
   WEBrick::HTTPServlet::FileHandler,
   ROOT.join("falstad").to_s
 )
+
+server.mount_proc "/examples.md" do |_req, res|
+  path = ROOT.join("examples.md")
+  unless path.exist?
+    res.status = 404
+    res["Content-Type"] = "text/plain; charset=utf-8"
+    res.body = "examples.md not found"
+    next
+  end
+
+  res.status = 200
+  res["Content-Type"] = "text/markdown; charset=utf-8"
+  res["Cache-Control"] = "no-store"
+  res.body = path.read
+end
 
 server.mount_proc "/api/health" do |_req, res|
   json_response(

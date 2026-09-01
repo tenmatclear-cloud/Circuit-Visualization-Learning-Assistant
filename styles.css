@@ -507,6 +507,17 @@ button:hover {
   justify-content: flex-start;
 }
 
+.example-buttons {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.example-buttons .ghost-button {
+  white-space: nowrap;
+}
+
 .helper-text {
   min-height: 3.3em;
 }
@@ -681,5 +692,10 @@ body.is-presenting #falstadFrame {
   .hero-tools {
     align-items: stretch;
     justify-self: stretch;
+  }
+
+  .action-row,
+  .example-buttons {
+    flex-wrap: wrap;
   }
 }
