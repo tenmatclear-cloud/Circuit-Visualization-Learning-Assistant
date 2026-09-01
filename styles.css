@@ -55,8 +55,9 @@ body::before {
 .hero {
   display: flex;
   justify-content: space-between;
-  gap: 24px;
-  padding: 30px 32px;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
   border: 1px solid rgba(255, 255, 255, 0.55);
   border-radius: var(--radius-xl);
   background: linear-gradient(135deg, rgba(255, 249, 238, 0.92), rgba(255, 247, 240, 0.76));
@@ -72,6 +73,18 @@ body::before {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+.hero .eyebrow {
+  margin: 0 0 4px;
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+}
+
+.hero h1 {
+  font-size: clamp(1.55rem, 2.5vw, 2.15rem);
+  line-height: 1.15;
+  color: var(--ink);
 }
 
 h1,
@@ -106,9 +119,12 @@ h3 {
 }
 
 .hero-copy {
-  max-width: 780px;
-  margin-top: 14px;
-  color: var(--muted);
+  max-width: 640px;
+  margin-top: 6px;
+  color: #7d8a90;
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.45;
 }
 
 .health-banner {
@@ -122,19 +138,18 @@ h3 {
   line-height: 1.5;
 }
 
-.hero-note {
+.hero-brand {
   display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
-  justify-content: flex-end;
-  gap: 10px;
-  min-width: 220px;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .hero-tools {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   align-items: flex-end;
+  align-self: center;
   gap: 12px;
 }
 
@@ -160,7 +175,6 @@ h3 {
   box-shadow: 0 8px 18px rgba(168, 69, 27, 0.18);
 }
 
-.note-chip,
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -221,11 +235,127 @@ h3 {
   padding: 18px;
 }
 
+details.output-card {
+  padding: 0;
+}
+
+details.output-card > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+details.output-card > summary h3::before {
+  content: "▸ ";
+  color: var(--muted);
+  font-family: inherit;
+}
+
+details.output-card[open] > summary h3::before {
+  content: "▾ ";
+}
+
+details.output-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.output-card .output-header {
+  padding: 18px;
+}
+
+details.output-card textarea {
+  width: calc(100% - 36px);
+  margin: 0 18px 14px;
+}
+
+.code-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0 18px 18px;
+}
+
+.simulator-tools summary {
+  cursor: pointer;
+  font-weight: 700;
+  list-style: none;
+}
+
+.simulator-tools summary::-webkit-details-marker {
+  display: none;
+}
+
+.simulator-tools summary::before {
+  content: "▸ ";
+  color: var(--muted);
+}
+
+.simulator-tools[open] summary::before {
+  content: "▾ ";
+}
+
+.simulator-tools .simulator-toolbar {
+  margin-top: 14px;
+}
+
+.exit-present-button {
+  display: none;
+}
+
 .field {
   display: flex;
   flex-direction: column;
   gap: 10px;
   font-weight: 600;
+}
+
+.field-heading,
+.field-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.field-heading-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.input-mode {
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(29, 45, 53, 0.08);
+  background: rgba(255, 255, 255, 0.4);
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease;
+}
+
+.input-mode.is-active {
+  border-color: rgba(15, 108, 120, 0.42);
+  background: rgba(15, 108, 120, 0.07);
+  box-shadow: 0 0 0 3px rgba(15, 108, 120, 0.08);
+}
+
+.input-mode.is-idle {
+  opacity: 0.58;
+}
+
+.mode-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(15, 108, 120, 0.14);
+  color: var(--teal);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+#userPrompt::placeholder {
+  color: rgba(94, 109, 115, 0.38);
 }
 
 textarea,
@@ -299,7 +429,8 @@ button:hover {
   box-shadow: 0 14px 30px rgba(179, 38, 30, 0.22);
 }
 
-.ghost-button.small {
+.ghost-button.small,
+.primary-button.small {
   padding: 9px 14px;
   font-size: 0.92rem;
 }
@@ -356,7 +487,8 @@ button:hover {
 }
 
 .action-row {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
 }
 
 .helper-text {
@@ -428,6 +560,52 @@ code {
   font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
 }
 
+body.is-presenting .hero-copy,
+body.is-presenting .eyebrow,
+body.is-presenting .control-panel,
+body.is-presenting .tips-card,
+body.is-presenting .health-banner,
+body.is-presenting .panel-kicker,
+body.is-presenting #presentButton {
+  display: none !important;
+}
+
+body.is-presenting .exit-present-button {
+  display: inline-flex;
+}
+
+body.is-presenting .page-shell {
+  width: min(1800px, calc(100% - 24px));
+  margin: 12px auto 16px;
+}
+
+body.is-presenting .hero {
+  padding: 14px 20px;
+}
+
+body.is-presenting h1 {
+  font-size: clamp(1.4rem, 2.4vw, 2rem);
+}
+
+body.is-presenting .hero-tools {
+  flex-direction: row;
+  align-items: center;
+}
+
+body.is-presenting .workspace {
+  grid-template-columns: 1fr;
+  margin-top: 12px;
+}
+
+body.is-presenting .simulator-panel {
+  padding: 16px;
+}
+
+body.is-presenting .simulator-stage,
+body.is-presenting #falstadFrame {
+  min-height: calc(100vh - 7rem);
+}
+
 @media (max-width: 1080px) {
   .workspace {
     grid-template-columns: 1fr;
@@ -437,6 +615,11 @@ code {
   #falstadFrame {
     min-height: 520px;
   }
+
+  body.is-presenting .simulator-stage,
+  body.is-presenting #falstadFrame {
+    min-height: calc(100vh - 8rem);
+  }
 }
 
 @media (max-width: 720px) {
@@ -445,23 +628,21 @@ code {
     margin-top: 10px;
   }
 
-  .hero,
   .panel {
     padding: 18px;
+  }
+
+  .hero {
+    padding: 10px 14px;
   }
 
   .hero,
   .panel-header,
   .output-header,
-  .action-row,
   .header-actions,
   .simulator-toolbar {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .hero-note {
-    justify-content: flex-start;
   }
 
   .hero-tools {

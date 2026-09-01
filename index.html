@@ -9,11 +9,11 @@
   <body>
     <div class="page-shell">
       <header class="hero">
-        <div>
+        <div class="hero-brand">
           <p class="eyebrow" id="heroEyebrow">Series / Parallel Learning Studio</p>
           <h1 id="heroTitle">電路視覺化教學助手</h1>
           <p class="hero-copy" id="heroCopy">
-            讓學生用文字或電路圖片生成 Falstad 專用代碼，再配合動態模擬觀察串聯、並聯與短路特徵。
+            用文字或電路圖片生成電路，再觀察電流、電壓與串聯／並聯的分別。
           </p>
         </div>
         <div class="hero-tools">
@@ -21,11 +21,9 @@
             <button class="lang-button is-active" id="langZhButton" type="button">繁中</button>
             <button class="lang-button" id="langEnButton" type="button">English</button>
           </div>
-          <div class="hero-note">
-            <span class="note-chip" id="chipAi">AI 生成</span>
-            <span class="note-chip" id="chipSim">Falstad 模擬</span>
-            <span class="note-chip" id="chipGuide">教學引導</span>
-          </div>
+          <button class="ghost-button exit-present-button" id="exitPresentButton" type="button">
+            離開展示
+          </button>
         </div>
       </header>
 
@@ -41,19 +39,30 @@
             <span class="status-pill" id="apiStatus">尚未生成</span>
           </div>
 
-          <label class="field">
-            <span id="promptLabel">文字需求</span>
+          <div class="field input-mode" id="promptField">
+            <div class="field-heading">
+              <span id="promptLabel">文字需求</span>
+              <div class="field-heading-actions">
+                <span class="mode-pill hidden" id="promptModePill">使用文字</span>
+                <button class="ghost-button small hidden" id="clearPromptButton" type="button">
+                  清除文字
+                </button>
+              </div>
+            </div>
             <textarea
               id="userPrompt"
               rows="8"
               placeholder="例如：請設計一個由兩個電阻組成的串聯電路，並加入一個短路變形圖供比較。"
             ></textarea>
-          </label>
+          </div>
 
-          <label class="field">
-            <span id="imageLabel">電路圖圖片（可選）</span>
+          <div class="field input-mode" id="imageField">
+            <div class="field-heading">
+              <label id="imageLabel" for="imageInput">電路圖圖片（可選）</label>
+              <span class="mode-pill hidden" id="imageModePill">使用圖片</span>
+            </div>
             <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" />
-          </label>
+          </div>
 
           <div class="image-preview hidden" id="imagePreviewWrap">
             <img id="imagePreview" alt="已上載的電路圖預覽" />
@@ -64,112 +73,123 @@
 
           <div class="action-row">
             <button class="primary-button" id="generateCircuitButton" type="button">
-              Generate Circuit
-            </button>
-            <button class="ghost-button" id="generateGuideButton" type="button">
-              Generate Guide
-            </button>
-            <button class="ghost-button" id="generateTutorButton" type="button">
-              Generate Tutor
-            </button>
-            <button class="danger-button hidden" id="stopGenerationButton" type="button">
-              STOP
+              生成電路
             </button>
             <button class="ghost-button" id="exampleButton" type="button">
               載入示例
             </button>
+            <button class="danger-button hidden" id="stopGenerationButton" type="button">
+              STOP
+            </button>
           </div>
 
           <p class="helper-text" id="feedbackText">
-            生成後，你可在 Step 2 直接修改 Falstad 專用代碼，再載入右側模擬器測試。
+            輸入需求或上載題目圖片，按「生成電路」。電路會自動出現在右側，可直接觀察電流與電壓。
           </p>
 
           <div class="output-stack">
-            <section class="output-card">
-              <div class="output-header">
+            <details class="output-card" id="codeDetails">
+              <summary class="output-header">
                 <div>
-                  <p class="panel-kicker" id="step2Label">Step 2</p>
-                  <h3 id="codeSectionTitle">Falstad 專用代碼</h3>
+                  <p class="panel-kicker" id="step2Label">進階</p>
+                  <h3 id="codeSectionTitle">電路代碼</h3>
                 </div>
                 <div class="header-actions">
                   <button class="ghost-button small" id="copyCodeButton" type="button">
                     複製
                   </button>
-                  <button class="ghost-button small" id="loadToFalstadButton" type="button">
-                    載入右側模擬器
-                  </button>
                 </div>
-              </div>
+              </summary>
               <textarea
                 id="falstadCode"
                 rows="12"
-                placeholder="AI 生成的 Falstad 匯入代碼會顯示在這裡。"
+                placeholder="生成後的電路代碼會顯示在這裡，一般不必打開。"
               ></textarea>
-            </section>
-
-            <section class="output-card">
-              <div class="output-header">
-                <div>
-                  <p class="panel-kicker" id="step3Label">Step 3</p>
-                  <h3 id="guideSectionTitle">Falstad 視覺化教學指引</h3>
-                </div>
-                <button class="ghost-button small" id="copyGuideButton" type="button">
-                  複製
+              <div class="code-actions">
+                <button class="primary-button small" id="loadToFalstadButton" type="button">
+                  載入右側模擬器
                 </button>
               </div>
+            </details>
+
+            <details class="output-card" id="guideDetails">
+              <summary class="output-header">
+                <div>
+                  <p class="panel-kicker" id="step3Label">觀察</p>
+                  <h3 id="guideSectionTitle">教學指引</h3>
+                </div>
+                <div class="header-actions">
+                  <button class="ghost-button small" id="generateGuideButton" type="button">
+                    生成教學指引
+                  </button>
+                  <button class="ghost-button small" id="copyGuideButton" type="button">
+                    複製
+                  </button>
+                </div>
+              </summary>
               <textarea
                 id="teachingGuide"
                 rows="12"
                 readonly
-                placeholder="AI 生成的觀察重點與操作建議會顯示在這裡。"
+                placeholder="觀察重點與操作建議會顯示在這裡。"
               ></textarea>
-            </section>
+            </details>
 
-            <section class="output-card">
-              <div class="output-header">
+            <details class="output-card" id="tutorDetails">
+              <summary class="output-header">
                 <div>
-                  <p class="panel-kicker" id="step4Label">Step 4</p>
-                  <h3 id="tutorSectionTitle">引導式解題教學草稿</h3>
+                  <p class="panel-kicker" id="step4Label">進階</p>
+                  <h3 id="tutorSectionTitle">解題教學草稿</h3>
                 </div>
-                <button class="ghost-button small" id="copyTutorButton" type="button">
-                  複製
-                </button>
-              </div>
+                <div class="header-actions">
+                  <button class="ghost-button small" id="generateTutorButton" type="button">
+                    生成解題教學
+                  </button>
+                  <button class="ghost-button small" id="copyTutorButton" type="button">
+                    複製
+                  </button>
+                </div>
+              </summary>
               <textarea
                 id="tutorOutput"
                 rows="12"
                 readonly
-                placeholder="AI 生成的引導式提問與教學流程會顯示在這裡。"
+                placeholder="引導式提問與教學流程會顯示在這裡。"
               ></textarea>
-            </section>
+            </details>
 
-            <section class="output-card">
-              <div class="output-header">
+            <details class="output-card" id="rawDetails">
+              <summary class="output-header">
                 <div>
-                  <p class="panel-kicker" id="stepRawLabel">Debug</p>
-                  <h3 id="rawSectionTitle">Raw AI Output</h3>
+                  <p class="panel-kicker" id="stepRawLabel">進階</p>
+                  <h3 id="rawSectionTitle">除錯輸出</h3>
                 </div>
                 <button class="ghost-button small" id="copyRawButton" type="button">
                   複製
                 </button>
-              </div>
+              </summary>
               <textarea
                 id="rawAiOutput"
                 rows="12"
                 readonly
-                placeholder="無論 AI 回傳什麼，原始文字都會顯示在這裡，方便排錯。"
+                placeholder="生成失敗時才需要打開這裡。"
               ></textarea>
-            </section>
+            </details>
           </div>
         </section>
 
         <section class="panel simulator-panel">
           <div class="panel-header">
             <div>
-              <p class="panel-kicker" id="step5Label">Step 5</p>
-              <h2 id="simulatorTitle">Falstad Circuit Simulation</h2>
+              <p class="panel-kicker" id="step5Label">模擬器</p>
+              <h2 id="simulatorTitle">電路模擬</h2>
             </div>
-            <span class="status-pill" id="simulatorStatus">等待載入</span>
+            <div class="header-actions">
+              <button class="ghost-button small" id="presentButton" type="button" aria-pressed="false">
+                課堂展示
+              </button>
+              <span class="status-pill" id="simulatorStatus">等待載入</span>
+            </div>
           </div>
 
           <div class="simulator-stage" id="simulatorStage">
@@ -199,24 +219,28 @@
             </div>
           </div>
 
-          <div class="simulator-toolbar">
-            <button class="ghost-button" id="refreshSimulatorButton" type="button">
-              重新檢查模擬器
-            </button>
-            <button class="ghost-button" id="exportCodeButton" type="button">
-              從右側匯出目前電路
-            </button>
-          </div>
-
           <div class="tips-card">
-            <h3 id="flowTitle">學生建議流程</h3>
+            <h3 id="flowTitle">模擬器簡易操作</h3>
             <ol>
-              <li id="flowItem1">在左側輸入電路需求或上載題目圖片。</li>
-              <li id="flowItem2">按下 `Generate` 取得 Falstad 代碼與教學指引。</li>
-              <li id="flowItem3">按 `載入右側模擬器`，或手動貼到 Falstad 匯入。</li>
-              <li id="flowItem4">觀察黃色小圓點、綠色電壓深淺與分岔位置，進行推理。</li>
+              <li id="flowItem1">黃色小點代表電流方向；可在右側「電流速度」再調慢，方便看清楚。</li>
+              <li id="flowItem2">顏色深淺代表電壓高低。</li>
+              <li id="flowItem3">若線路歪了或接錯，用滑鼠拖曳元件或接線端點改正，不必改左側代碼。</li>
+              <li id="flowItem4">右鍵可刪除接錯的線；開關可以直接點擊開合。</li>
+              <li id="flowItem5">觀察串聯是否只有一條路徑，並聯是否在分岔後分開。</li>
             </ol>
           </div>
+
+          <details class="tips-card simulator-tools" id="simulatorToolsDetails">
+            <summary id="simulatorToolsSummary">進階：模擬器工具</summary>
+            <div class="simulator-toolbar">
+              <button class="ghost-button" id="refreshSimulatorButton" type="button">
+                重新檢查模擬器
+              </button>
+              <button class="ghost-button" id="exportCodeButton" type="button">
+                從右側匯出目前電路
+              </button>
+            </div>
+          </details>
         </section>
       </main>
     </div>
