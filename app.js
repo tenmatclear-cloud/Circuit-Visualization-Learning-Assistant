@@ -6,8 +6,8 @@ const APP_CONFIG = {
   maxUploadBytes: 8 * 1024 * 1024,
   allowedImageTypes: ["image/png", "image/jpeg", "image/webp"],
   simulatorSources: {
-    "zh-Hant": "/circuit/circuitjs-zh-tw.html?whiteBackground=false",
-    en: "/circuit/circuitjs.html?whiteBackground=false",
+    "zh-Hant": "/circuit/circuitjs-zh-tw.html?lang=zh-tw&startCircuit=blank.txt&whiteBackground=false",
+    en: "/circuit/circuitjs.html?lang=en&startCircuit=blank.txt&whiteBackground=false",
   },
   teachingCurrentSpeed: 40,
   teachingFalstadHeader: "$ 1 0.000005 10.20027730826997 40 5 43",
@@ -300,7 +300,17 @@ const els = {
   healthBanner: document.getElementById("healthBanner"),
 };
 
-let currentLanguage = localStorage.getItem("language") || APP_CONFIG.defaultLanguage;
+const APP_LANGUAGE_KEY = "cvla-language";
+
+function normalizeAppLanguage(value) {
+  return String(value || "").trim() === "en" ? "en" : "zh-Hant";
+}
+
+function readStoredLanguage() {
+  return normalizeAppLanguage(localStorage.getItem(APP_LANGUAGE_KEY) || localStorage.getItem("language"));
+}
+
+let currentLanguage = readStoredLanguage();
 let uploadedImageDataUrl = "";
 let falstadSim = null;
 let simulatorPollTimer = null;
@@ -384,13 +394,15 @@ function setPresenting(nextPresenting) {
 }
 
 function setLanguage(language) {
-  currentLanguage = language;
-  localStorage.setItem("language", language);
+  currentLanguage = normalizeAppLanguage(language);
+  localStorage.setItem(APP_LANGUAGE_KEY, currentLanguage);
   renderLanguage();
   syncSimulatorLanguage();
 }
 
 function renderLanguage() {
+  document.documentElement.lang = currentLanguage === "en" ? "en" : "zh-Hant";
+  document.title = t("heroTitle");
   els.heroEyebrow.textContent = t("heroEyebrow");
   els.heroTitle.textContent = t("heroTitle");
   els.heroCopy.textContent = t("heroCopy");

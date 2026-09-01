@@ -53,16 +53,19 @@ body::before {
 }
 
 .hero {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto;
+  column-gap: 16px;
+  row-gap: 2px;
   align-items: center;
-  gap: 16px;
-  padding: 12px 20px;
+  padding: 10px 20px;
   border: 1px solid rgba(255, 255, 255, 0.55);
   border-radius: var(--radius-xl);
   background: linear-gradient(135deg, rgba(255, 249, 238, 0.92), rgba(255, 247, 240, 0.76));
   box-shadow: var(--shadow);
   backdrop-filter: blur(10px);
+  container-type: inline-size;
 }
 
 .eyebrow,
@@ -76,15 +79,26 @@ body::before {
 }
 
 .hero .eyebrow {
-  margin: 0 0 4px;
+  grid-column: 1;
+  grid-row: 1;
+  margin: 0;
   font-size: 0.68rem;
   letter-spacing: 0.14em;
 }
 
 .hero h1 {
-  font-size: clamp(1.55rem, 2.5vw, 2.15rem);
-  line-height: 1.15;
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  font-size: clamp(1.35rem, 3.5cqi, 2.05rem);
+  line-height: 1.1;
+  white-space: nowrap;
   color: var(--ink);
+}
+
+html[lang="en"] .hero h1 {
+  font-size: clamp(0.95rem, 2.3cqi, 1.52rem);
+  letter-spacing: 0;
 }
 
 h1,
@@ -119,12 +133,14 @@ h3 {
 }
 
 .hero-copy {
-  max-width: 640px;
-  margin-top: 6px;
+  grid-column: 1;
+  grid-row: 3;
+  max-width: none;
+  margin: 0;
   color: #7d8a90;
   font-size: 0.78rem;
   font-weight: 400;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
 .health-banner {
@@ -139,9 +155,7 @@ h3 {
 }
 
 .hero-brand {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+  display: contents;
 }
 
 .hero-tools {
@@ -149,6 +163,8 @@ h3 {
   flex-direction: column;
   justify-content: center;
   align-items: flex-end;
+  grid-column: 2;
+  grid-row: 2;
   align-self: center;
   gap: 12px;
 }
@@ -580,11 +596,15 @@ body.is-presenting .page-shell {
 }
 
 body.is-presenting .hero {
-  padding: 14px 20px;
+  padding: 10px 20px;
 }
 
 body.is-presenting h1 {
-  font-size: clamp(1.4rem, 2.4vw, 2rem);
+  font-size: clamp(1.35rem, 3.5cqi, 2rem);
+}
+
+html[lang="en"] body.is-presenting .hero h1 {
+  font-size: clamp(0.95rem, 2.3cqi, 1.52rem);
 }
 
 body.is-presenting .hero-tools {
@@ -633,10 +653,23 @@ body.is-presenting #falstadFrame {
   }
 
   .hero {
+    grid-template-columns: 1fr;
     padding: 10px 14px;
   }
 
-  .hero,
+  .hero .eyebrow,
+  .hero h1,
+  .hero-copy,
+  .hero-tools {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .hero h1,
+  html[lang="en"] .hero h1 {
+    white-space: normal;
+  }
+
   .panel-header,
   .output-header,
   .header-actions,
@@ -647,5 +680,6 @@ body.is-presenting #falstadFrame {
 
   .hero-tools {
     align-items: stretch;
+    justify-self: stretch;
   }
 }
