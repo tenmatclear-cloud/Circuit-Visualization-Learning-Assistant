@@ -5,3 +5,4 @@ server-config.local.json
 vendor
 README.md
 *.md
+!examples.md
