@@ -9,8 +9,8 @@ const APP_CONFIG = {
     "zh-Hant": "/circuit/circuitjs-zh-tw.html?lang=zh-tw&startCircuit=blank.txt&whiteBackground=false",
     en: "/circuit/circuitjs.html?lang=en&startCircuit=blank.txt&whiteBackground=false",
   },
-  teachingCurrentSpeed: 40,
-  teachingFalstadHeader: "$ 1 0.000005 10.20027730826997 40 5 43",
+  teachingCurrentSpeed: 50,
+  teachingFalstadHeader: "$ 1 0.000005 10.20027730826997 50 5 43",
 };
 
 const translations = {
