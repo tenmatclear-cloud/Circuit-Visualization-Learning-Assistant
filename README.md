@@ -39,36 +39,41 @@
 
 ## 本地設定
 
-請建立或編輯 `server-config.local.json`：
+本機金鑰只放在 `server-config.local.json`。這個檔已被 `.gitignore` 排除，不要把它 commit 到 GitHub。
+
+```bash
+cp server-config.example.json server-config.local.json
+```
+
+然後只改本機那份，把 `poe_api_key` 換成你在 `https://poe.com/api/keys` 建立的 key：
 
 ```json
 {
   "poe_api_key": "PASTE_YOUR_POE_API_KEY_HERE",
-  "poe_model": "gemini-3.1-pro",
+  "poe_model": "gemini-3.7-flash",
   "port": 8080
 }
 ```
 
 說明：
 
-- `poe_api_key`: 你的 Poe API key，可在 `https://poe.com/api/keys` 建立
-- `poe_model`: 你要使用的 Poe model id，例如 `gemini-3.1-pro`
+- `poe_api_key`: 只寫在 `server-config.local.json`，或用環境變數 `POE_API_KEY`
+- `poe_model`: 本機預設 `gemini-3.7-flash`；相片仍失敗時可改回 `gemini-3.1-pro` 對照
 - `port`: 本地 server port，預設 `8080`
-
-不要把真正 API key commit 到 GitHub。
+- Render 上線請用 Environment 的 `POE_API_KEY`，不要把本機 json 上傳到伺服器
 
 ## 本地啟動
 
 方法 1：直接執行
 
 ```bash
-/Users/clear/Documents/New\ project/serve.command
+./serve.command
 ```
 
 方法 2：命令列
 
 ```bash
-cd "/Users/clear/Documents/New project"
+cd "/Users/clear/Documents/GitHub/Circuit-Visualization-Learning-Assistant"
 ruby server.rb
 ```
 
@@ -124,7 +129,7 @@ http://localhost:8080
   "task": "circuit",
   "status": "completed",
   "falstad_code": "...",
-  "model_used": "gemini-3.1-pro",
+  "model_used": "gemini-3.7-flash",
   "raw_output": "..."
 }
 ```
@@ -146,7 +151,7 @@ http://localhost:8080
 
 ```txt
 POE_API_KEY=你的 Poe API key
-POE_MODEL=gemini-3.1-pro
+POE_MODEL=gemini-3.7-flash
 HOST=0.0.0.0
 PORT=10000
 ```
@@ -157,13 +162,14 @@ PORT=10000
 
 ## 穩定化措施
 
-- 輸出 token 上限設為 `65,536`
+- 預設 Poe model 為 `gemini-3.7-flash`；schema 約 8,192 tokens，guide/tutor 約 4,096 tokens
+- 中間 schema 可用相片 0–1 座標；最終 Falstad code 無論文字或相片都會 snap 成 16 倍數整數
 - 電路生成主路徑改為 `課程元件 schema -> 本地 compiler -> Falstad code`
 - schema 只允許香港中學常見元件，減少 AI 亂用 Falstad 低層元件
 - ammeter 會編譯成 Falstad 圓形安培計
 - voltmeter 會編譯成 Falstad 圓形 voltmeter / probe
 - 燈泡使用 Falstad lamp 元件，不再只用普通 resistor 代替
-- 圖片上載會壓縮到較高解析度，保留更多導線與儀器細節
+- 圖片上載會壓縮到約 1280px，並限制 PNG / JPEG / WebP
 - Poe API 暫時性錯誤、rate limit 或上游模型繁忙時會自動重試
 - 長時間生成改用背景 job + polling，避免 Render 或瀏覽器中途切斷
 - 顯示 `Raw AI Output`，方便看到 schema、compiled code 或 fallback 原因

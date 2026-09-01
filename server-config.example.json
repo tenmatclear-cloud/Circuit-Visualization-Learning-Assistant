@@ -1,0 +1,5 @@
+{
+  "poe_api_key": "PASTE_YOUR_POE_API_KEY_HERE",
+  "poe_model": "gemini-3.7-flash",
+  "port": 8080
+}

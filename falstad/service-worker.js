@@ -1,4 +1,4 @@
-const CACHE_NAME = 'circuitjs1-app-cache-v1';
+const CACHE_NAME = 'circuitjs1-app-cache-v2';
 const urlsToCache = [
   '/circuit/about.html',
   '/circuit/canvas2svg.js',
@@ -18,8 +18,11 @@ const urlsToCache = [
   '/circuit/opampreal.html',
   '/circuit/split.js',
   '/circuit/subcircuits.html',
-  // put everything else here
 ];
+
+function isNetworkFirst(url) {
+  return /circuitjs[^/]*\.html(?:\?|$)/.test(url) || url.includes('.nocache.js');
+}
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -29,46 +32,58 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  if (isNetworkFirst(event.request.url)) {
     event.respondWith(
-        caches.match(event.request).then((cachedResponse) => {
-            if (cachedResponse) {
-                // If the resource is already cached, return it
-                return cachedResponse;
-            }
+      fetch(event.request).then((networkResponse) => {
+        if (networkResponse.status === 200) {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+        }
 
-            // Otherwise, fetch it from the network and add it to the cache
-            return fetch(event.request).then((networkResponse) => {
-                // Only cache non-GET requests and responses that aren't errors
-                if (
-                    event.request.method === 'GET' &&
-                    networkResponse.status === 200
-                ) {
-		    const responseClone = networkResponse.clone();
-                    caches.open(CACHE_NAME).then((cache) => {
-                        cache.put(event.request, responseClone);
-                    });
-                }
-
-                return networkResponse;
-            });
-        })
+        return networkResponse;
+      }).catch(() => caches.match(event.request))
     );
+    return;
+  }
+
+  event.respondWith(
+    caches.match(event.request).then((cachedResponse) => {
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+
+      return fetch(event.request).then((networkResponse) => {
+        if (event.request.method === 'GET' && networkResponse.status === 200) {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+        }
+
+        return networkResponse;
+      });
+    })
+  );
 });
 
-
-// Activate event: cleans up old caches
 self.addEventListener('activate', (event) => {
-    const cacheWhitelist = [CACHE_NAME];  // List of cache versions you want to keep
+  const cacheWhitelist = [CACHE_NAME];
 
-    event.waitUntil(
-        caches.keys().then((cacheNames) => {
-            return Promise.all(
-                cacheNames.map((cacheName) => {
-                    if (!cacheWhitelist.includes(cacheName)) {
-                        return caches.delete(cacheName);  // Delete old caches that aren't in whitelist
-                    }
-                })
-            );
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cacheName) => {
+          if (!cacheWhitelist.includes(cacheName)) {
+            return caches.delete(cacheName);
+          }
         })
-    );
+      );
+    })
+  );
 });

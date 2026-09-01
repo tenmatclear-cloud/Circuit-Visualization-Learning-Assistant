@@ -29,6 +29,8 @@
         </div>
       </header>
 
+      <div class="health-banner hidden" id="healthBanner" hidden></div>
+
       <main class="workspace">
         <section class="panel control-panel">
           <div class="panel-header">
@@ -50,7 +52,7 @@
 
           <label class="field">
             <span id="imageLabel">電路圖圖片（可選）</span>
-            <input id="imageInput" type="file" accept="image/*" />
+            <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" />
           </label>
 
           <div class="image-preview hidden" id="imagePreviewWrap">
@@ -174,7 +176,7 @@
             <iframe
               id="falstadFrame"
               title="Falstad Circuit Simulator"
-              src="/circuit/circuitjs.html?whiteBackground=false"
+              src="about:blank"
             ></iframe>
 
             <div class="simulator-overlay" id="simulatorOverlay">

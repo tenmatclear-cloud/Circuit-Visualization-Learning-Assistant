@@ -10,9 +10,13 @@ require "net/http"
 ROOT = Pathname.new(__dir__)
 CONFIG_PATH = ROOT.join("server-config.local.json")
 POE_CHAT_COMPLETIONS_ENDPOINT = URI("https://api.poe.com/v1/chat/completions")
-MAX_OUTPUT_TOKENS = 65_536
-SCHEMA_MAX_OUTPUT_TOKENS = 65_536
+MAX_OUTPUT_TOKENS = 8_192
+SCHEMA_MAX_OUTPUT_TOKENS = 8_192
+GUIDE_MAX_OUTPUT_TOKENS = 4_096
+TUTOR_MAX_OUTPUT_TOKENS = 4_096
 API_STATUS_RETRY_ATTEMPTS = 3
+ALLOWED_IMAGE_MIME_TYPES = %w[image/png image/jpeg image/webp].freeze
+MAX_IMAGE_DATA_BYTES = 8 * 1024 * 1024
 POE_OPEN_TIMEOUT = ENV.fetch("POE_OPEN_TIMEOUT", "30").to_i
 POE_READ_TIMEOUT = ENV.fetch("POE_READ_TIMEOUT", "240").to_i
 POE_TOTAL_TIMEOUT = ENV.fetch("POE_TOTAL_TIMEOUT", "300").to_i
@@ -47,10 +51,12 @@ class GenerationError < StandardError
   end
 end
 
+class JobCanceledError < StandardError; end
+
 def load_config
   config = {
     "poe_api_key" => nil,
-    "poe_model" => "gemini-3.1-pro",
+    "poe_model" => "gemini-3.7-flash",
     "port" => 8080
   }
 
@@ -77,65 +83,6 @@ def parse_data_url(data_url)
   }
 end
 
-def circuit_component_schema
-  {
-    "type" => "object",
-    "properties" => {
-      "summary" => { "type" => "string" },
-      "components" => {
-        "type" => "array",
-        "items" => {
-          "type" => "object",
-          "properties" => {
-            "id" => { "type" => "string" },
-            "label" => { "type" => "string" },
-            "type" => { "type" => "string", "enum" => SUPPORTED_CIRCUIT_COMPONENT_TYPES },
-            "x1" => { "type" => "number" },
-            "y1" => { "type" => "number" },
-            "x2" => { "type" => "number" },
-            "y2" => { "type" => "number" },
-            "bbox" => {
-              "type" => "array",
-              "items" => { "type" => "number" }
-            },
-            "orientation" => { "type" => "string", "enum" => %w[horizontal vertical] },
-            "terminals" => { "type" => "object" },
-            "wiper_x" => { "type" => "integer" },
-            "wiper_y" => { "type" => "integer" },
-            "voltage" => { "type" => "number" },
-            "resistance" => { "type" => "number" },
-            "max_resistance" => { "type" => "number" },
-            "position" => { "type" => "number" },
-            "state" => { "type" => "string", "enum" => %w[open closed] }
-          },
-          "required" => ["type"],
-          "propertyOrdering" => [
-            "id",
-            "label",
-            "type",
-            "bbox",
-            "orientation",
-            "terminals",
-            "x1",
-            "y1",
-            "x2",
-            "y2",
-            "wiper_x",
-            "wiper_y",
-            "voltage",
-            "resistance",
-            "max_resistance",
-            "position",
-            "state"
-          ]
-        }
-      }
-    },
-    "required" => ["components"],
-    "propertyOrdering" => ["summary", "components"]
-  }
-end
-
 def user_request_label(prompt_text, output_language)
   return prompt_text unless prompt_text.to_s.empty?
 
@@ -143,31 +90,34 @@ def user_request_label(prompt_text, output_language)
 end
 
 def thinking_level_for(model, level)
-  return nil unless model.to_s.start_with?("gemini-")
+  return nil unless model.to_s.downcase.start_with?("gemini")
 
-  case level.to_s
-  when "minimal", "low", "high"
-    level.to_s
-  when "medium"
-    "high"
+  case level.to_s.downcase
+  when "low", "medium", "high"
+    level.to_s.downcase
   else
     "low"
   end
 end
 
-def build_generation_config(model, max_tokens:, temperature:, response_mime_type: nil, response_schema: nil, thinking_level: nil)
+# Poe Chat Completions ignores OpenAI response_format / Gemini responseSchema.
+# Keep prompts JSON-only; do not send unused structured-output fields.
+def build_generation_config(model, max_tokens:, temperature:, thinking_level: nil)
   config = {
     "temperature" => temperature,
     "maxOutputTokens" => max_tokens
   }
 
-  config["responseMimeType"] = response_mime_type if response_mime_type
-  config["responseSchema"] = response_schema if response_schema
-
   normalized_thinking_level = thinking_level_for(model, thinking_level)
   config["thinkingLevel"] = normalized_thinking_level if normalized_thinking_level
 
   config
+end
+
+def raise_if_job_canceled!
+  job_id = Thread.current[:generation_job_id].to_s
+  return if job_id.empty?
+  raise JobCanceledError, "生成已停止。" if job_canceled?(job_id)
 end
 
 def extract_output_text(data)
@@ -400,9 +350,11 @@ def poe_payload_from_generation_payload(payload, model)
     "model" => model,
     "messages" => messages,
     "temperature" => generation_config["temperature"],
-    "max_tokens" => generation_config["maxOutputTokens"],
-    "thinking_level" => generation_config["thinkingLevel"]
+    "max_tokens" => generation_config["maxOutputTokens"]
   }
+
+  thinking_level = generation_config["thinkingLevel"]
+  request_payload["extra_body"] = { "thinking_level" => thinking_level } if thinking_level
 
   request_payload.delete_if { |_key, value| value.nil? || value == "" }
 end
@@ -428,19 +380,21 @@ def request_poe_via_net_http(payload, api_key, model)
 end
 
 def request_poe(payload, api_key, model)
+  raise_if_job_canceled!
   request_poe_via_net_http(payload, api_key, model)
 end
 
-def perform_generation(payloads, api_key, preferred_model)
+def perform_generation(payloads, api_key, preferred_model, reject_truncated: true)
   last_error = nil
 
   payloads.each do |payload|
     API_STATUS_RETRY_ATTEMPTS.times do |attempt|
       begin
+        raise_if_job_canceled!
         status_code, body = request_poe(payload, api_key, preferred_model)
         parsed = JSON.parse(body)
 
-        if status_code.between?(200, 299) && response_truncated?(parsed)
+        if reject_truncated && status_code.between?(200, 299) && response_truncated?(parsed)
           last_error = GenerationError.new(
             truncation_error_message,
             raw_output: build_raw_output(extract_output_text(parsed), parsed),
@@ -456,6 +410,8 @@ def perform_generation(payloads, api_key, preferred_model)
         end
 
         return [status_code, parsed, preferred_model]
+      rescue JobCanceledError
+        raise
       rescue StandardError => e
         last_error = e
         sleep(attempt + 1) if attempt < API_STATUS_RETRY_ATTEMPTS - 1
@@ -481,37 +437,17 @@ def build_task_parts(prompt_text, image_data_url, instruction_text, output_langu
   if image_data_url && !image_data_url.empty?
     inline_data = parse_data_url(image_data_url)
     raise "圖片格式無法解析，請重新上載。" unless inline_data
+    unless ALLOWED_IMAGE_MIME_TYPES.include?(inline_data["mime_type"].to_s.downcase)
+      raise "只接受 PNG、JPEG 或 WebP 圖片。"
+    end
+    if inline_data["data"].to_s.bytesize > MAX_IMAGE_DATA_BYTES
+      raise "圖片太大，請改用較小的檔案或先裁切後再上載。"
+    end
 
     parts << { "inline_data" => inline_data }
   end
 
   parts
-end
-
-def perform_generation_relaxed(payloads, api_key, preferred_model)
-  last_error = nil
-
-  payloads.each do |payload|
-    API_STATUS_RETRY_ATTEMPTS.times do |attempt|
-      begin
-        status_code, body = request_poe(payload, api_key, preferred_model)
-        parsed = JSON.parse(body)
-
-        if retryable_upstream_status?(status_code, parsed) && attempt < API_STATUS_RETRY_ATTEMPTS - 1
-          sleep(attempt + 1)
-          next
-        end
-
-        return [status_code, parsed, preferred_model]
-      rescue StandardError => e
-        last_error = e
-        sleep(attempt + 1) if attempt < API_STATUS_RETRY_ATTEMPTS - 1
-      end
-    end
-  end
-
-  raise last_error if last_error
-  raise "Poe API 請求失敗。"
 end
 
 def build_circuit_schema_payload(prompt_text, image_data_url, output_language, model, compact: false)
@@ -521,12 +457,12 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
         "Output one JSON object for a Hong Kong secondary-school circuit schema.",
         "Return JSON text only. Do not include markdown fences, prose, comments, or trailing explanation.",
         "The top-level object must include a components array. If the request is simple, still output every needed component and wire.",
-        "For real photos, prefer photo-layout coordinates: use normalized decimals from 0 to 1 relative to the photo, preserving the photographed positions. The server will snap them to the Falstad grid.",
+        "For real photos, use photo-layout coordinates: normalized decimals from 0 to 1 relative to the photo, preserving photographed positions. The server will snap them onto the Falstad 16-grid when compiling Falstad code.",
         "For each real photographed component, provide bbox [left, top, right, bottom], orientation, and either x1/y1/x2/y2 terminal coordinates or terminals {a:[x,y], b:[x,y]}.",
-        "Use x1/y1/x2/y2 for the two electrical terminals. These can be normalized photo coordinates for photos or 16-grid Falstad coordinates for text-only requests.",
+        "Use x1/y1/x2/y2 for the two electrical terminals. Photos may use 0-to-1 values; text-only requests may already use Falstad 16-grid integers. Do not require schema coordinates themselves to be multiples of 16.",
         "The JSON must use only these component types: wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter.",
         "Use components only. Do not output raw Falstad dump lines.",
-        "All coordinates must be integers and multiples of 16.",
+        "The compiled Falstad code must use integer coordinates that are multiples of 16. The server performs that snap for every input, text or photo.",
         "Every wire, resistor, lamp, switch, ammeter, voltmeter, battery, and internal_resistance must be horizontal or vertical.",
         "Use wire components to build corners, rectangles, and branches.",
         "For real laboratory photos, first convert the physical setup into a clean schematic: trace only connected terminals and leads; ignore tables, hands, shadows, unused loose wires, and background objects.",
@@ -546,12 +482,12 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
         "請輸出一個香港中學物理電路用的 JSON schema。",
         "只輸出 JSON 文字。不要 markdown code fence，不要解釋，不要註解，不要在 JSON 後加任何文字。",
         "最外層 object 必須包含 components array。即使需求很簡單，也要輸出所有需要的元件和導線。",
-        "如果是真實相片，請優先使用 photo-layout coordinates：用 0 至 1 的小數表示相對於相片的位置，保留相片中的相對擺位；server 會自動 snap 到 Falstad 格線。",
+        "如果是真實相片，請使用 photo-layout coordinates：用 0 至 1 的小數表示相對於相片的位置，保留相片中的相對擺位。server 編譯 Falstad code 時會自動 snap 到 16 格。",
         "每個相片中的實物 component 請提供 bbox [left, top, right, bottom]、orientation，以及 x1/y1/x2/y2 端子座標或 terminals {a:[x,y], b:[x,y]}。",
-        "x1/y1/x2/y2 代表兩個電氣端子。相片可用 0 至 1 normalized 座標；純文字需求可用 16 倍數 Falstad 座標。",
+        "x1/y1/x2/y2 代表兩個電氣端子。相片可用 0 至 1 normalized 座標；純文字需求可直接用 Falstad 16 格整數。schema 本身不必是 16 的倍數。",
         "JSON 只可使用這些元件類型：wire、battery、resistor、internal_resistance、variable_resistor、lamp、switch、ammeter、voltmeter。",
         "請只輸出 schema，不要輸出原始 Falstad dump 代碼。",
-        "所有座標都必須是整數，而且一定要是 16 的倍數。",
+        "最終 Falstad code 的每個座標都必須是整數，而且一定要是 16 的倍數。無論文字或相片輸入，都由 server 負責 snap。",
         "wire、resistor、lamp、switch、ammeter、voltmeter、battery、internal_resistance 都必須保持水平或垂直。",
         "所有轉角、長方形框架、分支都請用 wire 元件補齊。",
         "如果輸入是真實實驗室相片，請先把實物連接轉成乾淨的電路圖：只追蹤真正連接的端子與導線，忽略桌面、手、陰影、未接上的鬆散導線和背景物件。",
@@ -579,9 +515,7 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
       model,
       max_tokens: SCHEMA_MAX_OUTPUT_TOKENS,
       temperature: 0,
-      response_mime_type: "application/json",
-      response_schema: circuit_component_schema,
-      thinking_level: compact ? "low" : "medium"
+      thinking_level: "low"
     )
   }
 end
@@ -597,7 +531,7 @@ def build_circuit_schema_retry_payload(prompt_text, image_data_url, output_langu
         "For photos, preserve photographed positions using normalized 0-to-1 coordinates. Prefer bbox [left, top, right, bottom], orientation, and terminal coordinates x1/y1/x2/y2 or terminals {a:[x,y], b:[x,y]}.",
         "x1/y1/x2/y2 are the two electrical terminals. Use normalized photo coordinates or 16-grid Falstad coordinates.",
         "Use only these types: wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter.",
-        "All compiled components must be horizontal or vertical. The server will snap normalized photo coordinates to multiples of 16.",
+        "All compiled components must be horizontal or vertical. The server will snap schema coordinates to Falstad multiples of 16 for both text and photo inputs.",
         "For the photo, trace only connected terminals and leads; ignore loose unused leads and background objects.",
         "Do not output Falstad dump code."
       ].join("\n")
@@ -610,7 +544,7 @@ def build_circuit_schema_retry_payload(prompt_text, image_data_url, output_langu
         "如果是相片，請用 0 至 1 normalized 座標保留相片擺位。優先提供 bbox [left, top, right, bottom]、orientation，以及 x1/y1/x2/y2 或 terminals {a:[x,y], b:[x,y]} 端子座標。",
         "x1/y1/x2/y2 代表兩個電氣端子。可用 normalized 相片座標或 16 倍數 Falstad 座標。",
         "只可使用這些 type：wire、battery、resistor、internal_resistance、variable_resistor、lamp、switch、ammeter、voltmeter。",
-        "編譯後的元件必須水平或垂直；server 會把 normalized 相片座標 snap 到 16 倍數。",
+        "編譯後的元件必須水平或垂直；無論文字或相片，server 都會把 schema 座標 snap 成 Falstad 16 倍數整數。",
         "如果是相片，只追蹤真正連接的端子與導線，忽略未接上的鬆散導線和背景物件。",
         "不要輸出 Falstad dump code。"
       ].join("\n")
@@ -631,8 +565,6 @@ def build_circuit_schema_retry_payload(prompt_text, image_data_url, output_langu
       model,
       max_tokens: SCHEMA_MAX_OUTPUT_TOKENS,
       temperature: 0,
-      response_mime_type: "application/json",
-      response_schema: circuit_component_schema,
       thinking_level: "low"
     )
   }
@@ -642,7 +574,7 @@ def build_circuit_code_payload(prompt_text, image_data_url, output_language, mod
   instruction_lines = [
     output_language.to_s == "en" ? "Your only task is to output Falstad circuit code that can be imported directly." : "你現在唯一的任務，是輸出可直接匯入 Falstad 的電路代碼。",
     output_language.to_s == "en" ? "Output only plain Falstad code. No JSON, no markdown, no explanations." : "只輸出 Falstad 純文字代碼，不要 JSON，不要 markdown，不要解釋。",
-    output_language.to_s == "en" ? "Every X and Y coordinate must be a multiple of 16." : "所有 X 與 Y 座標都必須是 16 的倍數。",
+    output_language.to_s == "en" ? "Every X and Y coordinate in the Falstad code must be an integer multiple of 16, whether the user provided text or a photo." : "無論使用者輸入文字或相片，Falstad code 裡每一個 X 與 Y 座標都必須是 16 的倍數整數。",
     output_language.to_s == "en" ? "Use legal Falstad elements only. Use 6V or 9V batteries when needed." : "只使用合法的 Falstad 元件；如需要電池，請用 6V 或 9V。",
     output_language.to_s == "en" ? "Never use shorthand element lines. Use these exact formats: battery `v x1 y1 x2 y2 0 0 40 voltage 0 0 0.5`; switch `s x1 y1 x2 y2 0 position false`; resistor `r x1 y1 x2 y2 0 resistance`; wire `w x1 y1 x2 y2 0`." : "絕不可使用簡寫元件行。請使用這些完整格式：電池 `v x1 y1 x2 y2 0 0 40 voltage 0 0 0.5`；開關 `s x1 y1 x2 y2 0 position false`；電阻 `r x1 y1 x2 y2 0 resistance`；導線 `w x1 y1 x2 y2 0`。",
     output_language.to_s == "en" ? "For example, a 9V battery must be `v 160 240 160 160 0 0 40 9 0 0 0.5`, not `v 160 240 160 160 0 9`." : "例如 9V 電池必須寫成 `v 160 240 160 160 0 0 40 9 0 0 0.5`，不可寫成 `v 160 240 160 160 0 9`。",
@@ -1001,6 +933,7 @@ def compile_course_schema_to_falstad(parsed_schema)
 end
 
 def generate_circuit_schema(prompt_text, image_data_url, output_language, api_key, model)
+  raise_if_job_canceled!
   first_payload = build_circuit_schema_payload(prompt_text, image_data_url, output_language, model, compact: false)
   status_code, data, model_used = perform_generation([first_payload], api_key, model)
   raw_text = extract_output_text(data)
@@ -1009,7 +942,10 @@ def generate_circuit_schema(prompt_text, image_data_url, output_language, api_ke
   begin
     parsed_schema = parse_circuit_schema_json(raw_text)
   rescue StandardError => first_error
+    raise if first_error.is_a?(JobCanceledError)
+
     raw_output = append_named_raw_output(raw_output, "Circuit Schema", build_raw_output(raw_text, data))
+    raise_if_job_canceled!
     retry_payload = build_circuit_schema_retry_payload(prompt_text, image_data_url, output_language, model, raw_text, first_error.message)
     status_code, data, model_used = perform_generation([retry_payload], api_key, model)
     raw_text = extract_output_text(data)
@@ -1045,9 +981,23 @@ def finalize_falstad_code(emitted_code, raw_output)
   [final_code, raw_output]
 end
 
+def snap_falstad_line_coordinates(line)
+  parts = line.to_s.split(/\s+/)
+  return line if parts.empty? || parts.first == "$"
+
+  (1..4).each do |index|
+    value = parts[index]
+    next unless value.to_s.match?(/\A-?\d+(?:\.\d+)?\z/)
+
+    parts[index] = snap_to_grid(value).to_s
+  end
+
+  parts.join(" ")
+end
+
 def normalize_falstad_dump_lines(code)
   code.to_s.split("\n").map do |line|
-    stripped = line.strip
+    stripped = snap_falstad_line_coordinates(line.strip)
     parts = stripped.split(/\s+/)
 
     case parts.first
@@ -1081,7 +1031,8 @@ def generate_circuit_code(prompt_text, image_data_url, output_language, api_key,
       build_circuit_code_payload(prompt_text, image_data_url, output_language, model, emitted_code: emitted_code, compact: true)
     ]
 
-    status_code, data, model_used = perform_generation_relaxed(payloads, api_key, model)
+    raise_if_job_canceled!
+    status_code, data, model_used = perform_generation(payloads, api_key, model, reject_truncated: false)
     return [status_code, data, emitted_code, raw_output, model_used] unless status_code.between?(200, 299)
 
     chunk_text = normalize_model_field(extract_output_text(data), preserve_newlines: true)
@@ -1132,7 +1083,7 @@ def build_guide_payload(prompt_text, output_language, falstad_code, model)
     ],
     "generationConfig" => build_generation_config(
       model,
-      max_tokens: MAX_OUTPUT_TOKENS,
+      max_tokens: GUIDE_MAX_OUTPUT_TOKENS,
       temperature: 0.2,
       thinking_level: "low"
     )
@@ -1166,7 +1117,7 @@ def build_tutor_payload(prompt_text, output_language, falstad_code, model)
     ],
     "generationConfig" => build_generation_config(
       model,
-      max_tokens: MAX_OUTPUT_TOKENS,
+      max_tokens: TUTOR_MAX_OUTPUT_TOKENS,
       temperature: 0.3,
       thinking_level: "medium"
     )
@@ -1201,6 +1152,11 @@ end
 
 def store_job(job_id, payload)
   JOBS_MUTEX.synchronize do
+    current = JOBS[job_id]
+    if current && current["status"] == "canceled" && payload["status"] != "canceled"
+      return current.dup
+    end
+
     JOBS[job_id] ||= {}
     JOBS[job_id].merge!(payload)
     JOBS[job_id]["updated_at"] = Time.now.to_i
@@ -1247,8 +1203,7 @@ def cancel_job(job_id)
       job["updated_at"] = Time.now.to_i
     end
 
-    thread = JOB_THREADS.delete(job_id)
-    thread&.kill if thread&.alive?
+    JOB_THREADS.delete(job_id)
     job.dup
   end
 end
@@ -1270,6 +1225,8 @@ def execute_generate_task(task, prompt_text, image_data_url, output_language, fa
       falstad_code_text = compile_course_schema_to_falstad(parsed_schema)
       raw_output = append_named_raw_output(schema_raw_output, "Compiled Falstad Code", falstad_code_text)
     rescue StandardError => schema_error
+      raise if schema_error.is_a?(JobCanceledError)
+
       raw_output =
         if schema_error.is_a?(GenerationError)
           schema_error.raw_output.to_s
@@ -1296,6 +1253,7 @@ def execute_generate_task(task, prompt_text, image_data_url, output_language, fa
       end
 
       raw_output = append_named_raw_output(raw_output, "Schema Fallback", "Schema compiler failed, so the server retried direct Falstad generation.")
+      raise_if_job_canceled!
 
       begin
         status_code, upstream_data, falstad_code_text, direct_raw_output, model_used = generate_circuit_code(
@@ -1477,6 +1435,7 @@ server.mount_proc "/api/generate" do |req, res|
 
     worker = Thread.new do
       Thread.current.report_on_exception = false if Thread.current.respond_to?(:report_on_exception=)
+      Thread.current[:generation_job_id] = job_id
       next if job_canceled?(job_id)
 
       store_job(job_id, { "status" => "running" })
@@ -1488,6 +1447,8 @@ server.mount_proc "/api/generate" do |req, res|
         next if job_canceled?(job_id)
 
         store_job(job_id, result.merge("job_id" => job_id, "status" => "completed"))
+      rescue JobCanceledError
+        next
       rescue JSON::ParserError
         next if job_canceled?(job_id)
 

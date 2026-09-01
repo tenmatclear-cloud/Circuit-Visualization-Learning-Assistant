@@ -1,0 +1,7 @@
+.git
+.gitignore
+.DS_Store
+server-config.local.json
+vendor
+README.md
+*.md

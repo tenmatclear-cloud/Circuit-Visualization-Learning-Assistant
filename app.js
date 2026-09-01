@@ -1,7 +1,10 @@
 const APP_CONFIG = {
   generateEndpoint: "/api/generate",
+  healthEndpoint: "/api/health",
   defaultLanguage: "zh-Hant",
-  uploadImageMaxDimension: 1800,
+  uploadImageMaxDimension: 1280,
+  maxUploadBytes: 8 * 1024 * 1024,
+  allowedImageTypes: ["image/png", "image/jpeg", "image/webp"],
   simulatorSources: {
     "zh-Hant": "/circuit/circuitjs-zh-tw.html?whiteBackground=false",
     en: "/circuit/circuitjs.html?whiteBackground=false",
@@ -54,6 +57,8 @@ const translations = {
     overlayItem2: "確認網址是 http://localhost:8080。",
     overlayItem3: "重新整理本頁。",
     overlayTip: "如果仍未載入，請檢查 falstad/circuitjs.html 是否存在，並重新啟動本地 server。",
+    healthMissingKey: "後端已啟動，但尚未設定 Poe API key。請在 server-config.local.json 填入金鑰後重新啟動。",
+    healthUnreachable: "未能連上本地後端。請用 serve.command 或 ruby server.rb 啟動，再開 http://localhost:8080。",
     refreshSimulatorButton: "重新檢查模擬器",
     exportCodeButton: "從右側匯出目前電路",
     flowTitle: "學生建議流程",
@@ -86,6 +91,10 @@ const translations = {
       generatedGuide: "教學指引已生成，可配合右側模擬器帶學生觀察。",
       generatedTutor: "引導式解題教學已生成，可作為課堂提問流程草稿。",
       generateFailed: "生成失敗：",
+      invalidImageType: "只接受 PNG、JPEG 或 WebP 圖片。",
+      imageTooLarge: "圖片太大，請改用 8MB 以下的檔案。",
+      imageReadFailed: "無法讀取這張圖片，請改選另一個檔案。",
+      emptyCircuit: "生成完成，但沒有可用的 Falstad 代碼。請再試一次。",
       noCopy: "目前沒有可複製的內容。",
       copiedCode: "已複製 Falstad 代碼",
       copiedGuide: "已複製教學指引",
@@ -151,6 +160,8 @@ const translations = {
     overlayItem2: "Make sure the URL is http://localhost:8080.",
     overlayItem3: "Refresh this page.",
     overlayTip: "If it still does not load, confirm falstad/circuitjs.html exists and restart the local server.",
+    healthMissingKey: "The backend is running, but no Poe API key is configured. Add it in server-config.local.json and restart.",
+    healthUnreachable: "The local backend is not reachable. Start it with serve.command or ruby server.rb, then open http://localhost:8080.",
     refreshSimulatorButton: "Recheck Simulator",
     exportCodeButton: "Export Current Circuit",
     flowTitle: "Suggested Student Flow",
@@ -183,6 +194,10 @@ const translations = {
       generatedGuide: "The teaching guide is ready for classroom observation and discussion.",
       generatedTutor: "The guided tutoring draft is ready to use as a lesson flow.",
       generateFailed: "Generation failed: ",
+      invalidImageType: "Only PNG, JPEG, or WebP images are accepted.",
+      imageTooLarge: "The image is too large. Please use a file smaller than 8MB.",
+      imageReadFailed: "This image could not be read. Please choose another file.",
+      emptyCircuit: "Generation finished, but no usable Falstad code was returned. Please try again.",
       noCopy: "There is nothing to copy yet.",
       copiedCode: "Falstad code copied",
       copiedGuide: "Teaching guide copied",
@@ -262,6 +277,7 @@ const els = {
   flowItem2: document.getElementById("flowItem2"),
   flowItem3: document.getElementById("flowItem3"),
   flowItem4: document.getElementById("flowItem4"),
+  healthBanner: document.getElementById("healthBanner"),
 };
 
 let currentLanguage = localStorage.getItem("language") || APP_CONFIG.defaultLanguage;
@@ -273,8 +289,11 @@ let currentLoadingTask = null;
 let activeJobId = "";
 let stopRequested = false;
 let activeRequestController = null;
+let generationSessionId = 0;
+let healthBannerKey = "";
 const JOB_POLL_INTERVAL_MS = 2000;
-const JOB_POLL_MAX_ATTEMPTS = 240;
+const JOB_POLL_MAX_ATTEMPTS = 150;
+const JOB_POLL_NETWORK_RETRIES = 3;
 
 els.langZhButton.addEventListener("click", () => setLanguage("zh-Hant"));
 els.langEnButton.addEventListener("click", () => setLanguage("en"));
@@ -359,6 +378,10 @@ function renderLanguage() {
   if (currentFeedbackKey === "helperText") {
     setFeedback(t("helperText"), false, "helperText");
   }
+
+  if (healthBannerKey) {
+    setHealthBanner(t(healthBannerKey), true);
+  }
 }
 
 function fillExample() {
@@ -369,6 +392,20 @@ function handleImageUpload(event) {
   const [file] = event.target.files || [];
   if (!file) {
     clearImage();
+    return;
+  }
+
+  if (!APP_CONFIG.allowedImageTypes.includes(file.type)) {
+    clearImage();
+    setFeedback(t("feedback.invalidImageType"), true);
+    setApiStatus("error");
+    return;
+  }
+
+  if (file.size > APP_CONFIG.maxUploadBytes) {
+    clearImage();
+    setFeedback(t("feedback.imageTooLarge"), true);
+    setApiStatus("error");
     return;
   }
 
@@ -385,7 +422,7 @@ function handleImageUpload(event) {
     .catch((error) => {
       console.error(error);
       clearImage();
-      setFeedback(t("feedback.needInput"), true);
+      setFeedback(t("feedback.imageReadFailed"), true);
       setApiStatus("error");
     });
 }
@@ -503,6 +540,8 @@ async function runGenerationTask(task) {
     return;
   }
 
+  const sessionId = generationSessionId + 1;
+  generationSessionId = sessionId;
   setLoadingState(task, true);
   stopRequested = false;
   activeJobId = "";
@@ -534,8 +573,17 @@ async function runGenerationTask(task) {
       throw error;
     }
 
+    if (sessionId !== generationSessionId) {
+      return;
+    }
+
     activeJobId = startPayload.job_id || "";
-    const payload = await pollGenerationJob(activeJobId);
+    const payload = await pollGenerationJob(activeJobId, sessionId);
+
+    if (sessionId !== generationSessionId) {
+      return;
+    }
+
     const rawOutput = payload.raw_output || "";
     els.rawAiOutput.value = rawOutput;
 
@@ -546,7 +594,12 @@ async function runGenerationTask(task) {
     }
 
     if (task === "circuit") {
-      els.falstadCode.value = normalizeGeneratedText(payload.falstad_code, true);
+      const generatedCode = normalizeGeneratedText(payload.falstad_code, true);
+      if (!generatedCode) {
+        throw new Error(t("feedback.emptyCircuit"));
+      }
+
+      els.falstadCode.value = generatedCode;
       els.teachingGuide.value = "";
       els.tutorOutput.value = "";
     } else if (task === "guide") {
@@ -558,6 +611,10 @@ async function runGenerationTask(task) {
     setFeedback(t(`feedback.generated${capitalizeTask(task)}`), false);
     setApiStatus("success");
   } catch (error) {
+    if (sessionId !== generationSessionId) {
+      return;
+    }
+
     if (stopRequested || error?.name === "AbortError") {
       setFeedback(t("feedback.canceled"), false);
       setApiStatus("idle");
@@ -571,6 +628,10 @@ async function runGenerationTask(task) {
     setFeedback(`${t("feedback.generateFailed")}${translateBackendError(readableErrorMessage(error))}`, true);
     setApiStatus("error");
   } finally {
+    if (sessionId !== generationSessionId) {
+      return;
+    }
+
     activeJobId = "";
     activeRequestController = null;
     stopRequested = false;
@@ -582,30 +643,49 @@ function wait(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function pollGenerationJob(jobId) {
+async function pollGenerationJob(jobId, sessionId) {
   if (!jobId) {
     throw new Error("生成工作沒有回傳 job id。");
   }
 
   for (let attempt = 0; attempt < JOB_POLL_MAX_ATTEMPTS; attempt += 1) {
-    if (stopRequested) {
+    if (stopRequested || sessionId !== generationSessionId) {
       return { status: "canceled" };
     }
 
     await wait(attempt === 0 ? 0 : JOB_POLL_INTERVAL_MS);
 
-    if (stopRequested) {
+    if (stopRequested || sessionId !== generationSessionId) {
       return { status: "canceled" };
     }
 
-    const response = await fetch(APP_CONFIG.generateEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ jobId }),
-      signal: activeRequestController?.signal,
-    });
+    let response;
+    let networkFailures = 0;
+
+    while (networkFailures <= JOB_POLL_NETWORK_RETRIES) {
+      try {
+        response = await fetch(APP_CONFIG.generateEndpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ jobId }),
+          signal: activeRequestController?.signal,
+        });
+        break;
+      } catch (error) {
+        if (error?.name === "AbortError" || stopRequested || sessionId !== generationSessionId) {
+          return { status: "canceled" };
+        }
+
+        networkFailures += 1;
+        if (networkFailures > JOB_POLL_NETWORK_RETRIES) {
+          throw error;
+        }
+
+        await wait(1000 * networkFailures);
+      }
+    }
 
     const payload = await response.json().catch(() => ({}));
 
@@ -613,6 +693,10 @@ async function pollGenerationJob(jobId) {
       const error = new Error(payload.error || `API request failed with status ${response.status}`);
       error.rawOutput = payload.raw_output || "";
       throw error;
+    }
+
+    if (sessionId !== generationSessionId) {
+      return { status: "canceled" };
     }
 
     if (payload.raw_output) {
@@ -642,6 +726,8 @@ async function stopGenerationTask() {
     return;
   }
 
+  const sessionId = generationSessionId;
+  const jobId = activeJobId;
   stopRequested = true;
   els.stopGenerationButton.disabled = true;
   setFeedback(t("feedback.canceling"), false);
@@ -650,28 +736,26 @@ async function stopGenerationTask() {
     activeRequestController.abort();
   }
 
-  if (!activeJobId) {
-    setFeedback(t("feedback.canceled"), false);
-    setApiStatus("idle");
-    setLoadingState(currentLoadingTask, false);
-    return;
+  if (jobId) {
+    try {
+      await fetch(APP_CONFIG.generateEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ cancelJobId: jobId }),
+      });
+    } catch (error) {
+      console.warn("Unable to cancel the backend job.", error);
+    }
   }
 
-  try {
-    await fetch(APP_CONFIG.generateEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ cancelJobId: activeJobId }),
-    });
-  } catch (error) {
-    console.warn("Unable to cancel the backend job.", error);
+  if (sessionId !== generationSessionId) {
+    return;
   }
 
   setFeedback(t("feedback.canceled"), false);
   setApiStatus("idle");
-  setLoadingState(currentLoadingTask, false);
 }
 
 function translateBackendError(message) {
@@ -692,16 +776,15 @@ function translateBackendError(message) {
     "Failed to fetch":
       "The network connection was interrupted, usually because the server connection was cut before a response completed. Refresh the page and try again.",
     "圖片格式無法解析，請重新上載。": "The image format could not be parsed. Please upload it again.",
+    "只接受 PNG、JPEG 或 WebP 圖片。": "Only PNG, JPEG, or WebP images are accepted.",
+    "圖片太大，請改用較小的檔案或先裁切後再上載。": "The image is too large. Please use a smaller file or crop it first.",
     "AI 沒有回傳文字內容，請再試一次。": "The AI returned no text. Please try again.",
     "AI 沒有回傳 Falstad 代碼，請再試一次。": "The AI returned no Falstad code. Please try again.",
     "AI 沒有回傳教學指引，請再試一次。": "The AI returned no teaching guide. Please try again.",
     "AI 沒有回傳解題教學內容，請再試一次。": "The AI returned no tutoring content. Please try again.",
-    "AI 規劃階段沒有回傳可用內容，請再試一次。": "The AI planning step returned no usable content. Please try again.",
     "AI 回應不是有效 JSON，請再按一次 Generate。": "The AI response was not valid JSON. Please click Generate again.",
     "AI 回應過長，系統已自動改用更精簡版本重試，但仍未完成。請把需求拆細一點，或先生成較簡單的單一電路。":
       "The AI response was too long. The system already retried with a more compact version, but it still did not complete. Please simplify the request or generate a single simple circuit first.",
-    "Google API 連線中斷。": "The Google API connection was interrupted.",
-    "Google API 連線失敗。": "The Google API connection failed.",
   };
 
   return knownTranslations[message] || message;
@@ -711,6 +794,41 @@ function setFeedback(message, isError, feedbackKey = null) {
   currentFeedbackKey = feedbackKey || "runtime";
   els.feedbackText.textContent = message;
   els.feedbackText.style.color = isError ? "#a8451b" : "";
+}
+
+function setHealthBanner(message, visible) {
+  if (!els.healthBanner) {
+    return;
+  }
+
+  els.healthBanner.textContent = message;
+  els.healthBanner.hidden = !visible;
+  els.healthBanner.classList.toggle("hidden", !visible);
+}
+
+async function checkBackendHealth() {
+  try {
+    const response = await fetch(APP_CONFIG.healthEndpoint, { method: "GET" });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok || !payload.ok) {
+      healthBannerKey = "healthUnreachable";
+      setHealthBanner(t(healthBannerKey), true);
+      return;
+    }
+
+    if (!payload.has_api_key) {
+      healthBannerKey = "healthMissingKey";
+      setHealthBanner(t(healthBannerKey), true);
+      return;
+    }
+
+    healthBannerKey = "";
+    setHealthBanner("", false);
+  } catch (error) {
+    healthBannerKey = "healthUnreachable";
+    setHealthBanner(t(healthBannerKey), true);
+  }
 }
 
 function setApiStatus(state) {
@@ -898,3 +1016,4 @@ setApiStatus("idle");
 setSimulatorStatus("waiting");
 setFeedback(t("helperText"), false, "helperText");
 syncSimulatorLanguage();
+checkBackendHealth();
