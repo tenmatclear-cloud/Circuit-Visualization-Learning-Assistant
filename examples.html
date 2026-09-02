@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>範例電路</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell examples-shell">
+      <header class="hero">
+        <div class="hero-brand">
+          <p class="eyebrow" id="heroEyebrow">Ready-made classroom examples</p>
+          <h1 id="heroTitle">範例電路</h1>
+          <p class="hero-copy" id="heroCopy">
+            課堂上即時示範，或自己對比串聯、並聯與綜合。每條都有圖和 Falstad 代碼，不用等待生成。
+          </p>
+        </div>
+        <div class="hero-tools">
+          <div class="language-switch" aria-label="Language switch">
+            <button class="lang-button is-active" id="langZhButton" type="button">繁中</button>
+            <button class="lang-button" id="langEnButton" type="button">English</button>
+          </div>
+        </div>
+      </header>
+
+      <div class="examples-toolbar">
+        <p class="examples-intro-copy" id="introCopy">
+          投影圖卡即可講。要看電流，按「在主頁模擬」。開關先打開，載入後點一下合上。
+        </p>
+        <div class="example-filters" id="exampleFilters" role="tablist" aria-label="Filter examples"></div>
+      </div>
+      <p class="helper-text" id="feedbackText"></p>
+
+      <div class="example-library" id="exampleLibrary"></div>
+    </div>
+
+    <script src="./examples.js"></script>
+  </body>
+</html>

@@ -21,6 +21,37 @@
             <button class="lang-button is-active" id="langZhButton" type="button">繁中</button>
             <button class="lang-button" id="langEnButton" type="button">English</button>
           </div>
+          <div class="api-key-entry">
+            <button
+              class="ghost-button small api-key-button"
+              id="apiKeyButton"
+              type="button"
+              aria-expanded="false"
+              aria-controls="apiKeyPanel"
+            >
+              API key
+            </button>
+            <div class="api-key-panel hidden" id="apiKeyPanel" hidden>
+              <label class="api-key-label" id="apiKeyLabel" for="apiKeyInput">Poe API key</label>
+              <p class="api-key-hint" id="apiKeyHint">
+                金鑰只存在這個瀏覽器，用來呼叫 Poe。可到
+                <a href="https://poe.com/api/keys" target="_blank" rel="noreferrer">poe.com/api/keys</a>
+                建立。
+              </p>
+              <input
+                id="apiKeyInput"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="sk-..."
+              />
+              <div class="api-key-actions">
+                <button class="primary-button small" id="saveApiKeyButton" type="button">儲存</button>
+                <button class="ghost-button small" id="clearApiKeyButton" type="button">清除</button>
+              </div>
+              <p class="api-key-status" id="apiKeyStatusText"></p>
+            </div>
+          </div>
           <button class="ghost-button exit-present-button" id="exitPresentButton" type="button">
             離開展示
           </button>
@@ -35,7 +66,7 @@
         <div class="quick-guide-body">
           <ol class="quick-guide-steps">
             <li id="quickGuideStep1">
-              在左側輸入文字，或上載電路圖／相片。可按「串聯示例」「並聯示例」，或按「載入範例圖」。
+              在左側輸入文字，或上載電路圖／相片。可按「串聯示例」「並聯示例」，或按「載入範例圖」。要現成電路可先去「範例電路」。
             </li>
             <li id="quickGuideStep2">按「生成電路」，等待右側模擬器出現電路。</li>
             <li id="quickGuideStep3">
@@ -54,14 +85,24 @@
         </div>
       </details>
 
-      <div class="health-banner hidden" id="healthBanner" hidden></div>
+      <div class="health-banner hidden" id="healthBanner" hidden>
+        <p id="healthBannerText"></p>
+        <button class="ghost-button small hidden" id="healthBannerKeyButton" type="button">
+          填入 API key
+        </button>
+      </div>
 
       <main class="workspace">
         <section class="panel control-panel">
           <div class="panel-header">
             <div>
               <p class="panel-kicker" id="step1Label">Step 1</p>
-              <h2 id="inputSectionTitle">輸入需求</h2>
+              <div class="input-title-with-link">
+                <h2 id="inputSectionTitle">輸入需求</h2>
+                <a class="examples-nav-link" id="examplesPageLink" href="./examples.html">
+                  範例電路
+                </a>
+              </div>
             </div>
             <span class="status-pill" id="apiStatus">尚未生成</span>
           </div>

@@ -1,0 +1,130 @@
+{
+  "examples": [
+    {
+      "id": "series-1",
+      "category": "series",
+      "title": {
+        "zh-Hant": "兩個燈泡串聯",
+        "en": "Two lamps in series"
+      },
+      "description": {
+        "zh-Hant": "上邊是開關和電池，底邊兩盞燈一前一後。合上開關後，電流只有一條路，兩燈一樣較暗。可跟右邊「三燈繞圈」對比：燈愈多，同一條路上愈暗。",
+        "en": "A switch and battery sit on top; two lamps sit on the bottom, one after the other. Close the switch: there is only one path, and both lamps are equally dim. Compare with the three-lamp loop to the right: more lamps on the same path glow more dimly."
+      },
+      "image": "/diagrams/series-1.jpg",
+      "circuit": "/assets/examples/library/series-1.txt"
+    },
+    {
+      "id": "series-2",
+      "category": "series",
+      "title": {
+        "zh-Hant": "三個燈泡繞圈串聯",
+        "en": "Three lamps around a loop"
+      },
+      "description": {
+        "zh-Hant": "開關和電池仍在上邊，左、底、右各一盞燈，繞成一圈。合上後三燈同一電流。佈局不同，接法仍是串聯。",
+        "en": "The switch and battery stay on top. One lamp is on the left, one at the bottom, and one on the right. Close the switch: all three share the same current. The drawing looks different, but it is still series."
+      },
+      "image": "/diagrams/series-2.jpg",
+      "circuit": "/assets/examples/library/series-2.txt"
+    },
+    {
+      "id": "series-3",
+      "category": "series",
+      "title": {
+        "zh-Hant": "三個燈泡曲折串聯",
+        "en": "Three lamps in a zigzag"
+      },
+      "description": {
+        "zh-Hant": "三盞燈排成三層，看起來像分層，但其實電流仍要一盞接一盞地走。合上開關後跟前兩圖一樣：只有一條路。分層外觀不等於並聯。",
+        "en": "The three lamps are stacked in a zigzag, so they can look like layers. The current still has to pass through each lamp in turn. Close the switch: there is still only one path. A layered drawing is not parallel."
+      },
+      "image": "/diagrams/series-3.jpg",
+      "circuit": "/assets/examples/library/series-3.txt"
+    },
+    {
+      "id": "parallel-1",
+      "category": "parallel",
+      "title": {
+        "zh-Hant": "兩個電阻並聯",
+        "en": "Two resistors in parallel"
+      },
+      "description": {
+        "zh-Hant": "上邊是開關和電池，兩隻電阻上下並排，左右有接點。合上後電流在接點分開，再在另一接點會合。可跟「三電阻並聯」對比支路數目。",
+        "en": "A switch and battery sit on top. Two resistors sit one above the other, joined at dots on both sides. Close the switch: current splits at one junction and meets again at the other. Compare with three parallel resistors to see extra branches."
+      },
+      "image": "/diagrams/parallel-1.jpg",
+      "circuit": "/assets/examples/library/parallel-1.txt"
+    },
+    {
+      "id": "parallel-2",
+      "category": "parallel",
+      "title": {
+        "zh-Hant": "三個電阻並聯",
+        "en": "Three resistors in parallel"
+      },
+      "description": {
+        "zh-Hant": "電池直放左邊，開關在底邊，右邊三隻電阻並列。合上後三條支路同一電壓。這是常見的「梯級」畫法。",
+        "en": "The battery stands on the left, the switch is on the bottom, and three resistors hang side by side. Close the switch: all three branches have the same voltage. This is the usual ladder drawing."
+      },
+      "image": "/diagrams/parallel-2.jpg",
+      "circuit": "/assets/examples/library/parallel-2.txt"
+    },
+    {
+      "id": "parallel-3",
+      "category": "parallel",
+      "title": {
+        "zh-Hant": "電源放中間的並聯",
+        "en": "Parallel with the supply in the middle"
+      },
+      "description": {
+        "zh-Hant": "中間一條是開關和電池，上下各一隻電阻，左右直軌相連。接法與「兩個電阻並聯」相同，只是電源畫在中間。可對照兩圖，確認同一並聯。",
+        "en": "The switch and battery sit on the middle rail. One resistor is above, one below, and the side rails join them. This is the same parallel connection as two resistors side by side, with the supply drawn in the middle. Compare the two drawings."
+      },
+      "image": "/diagrams/parallel-3.jpg",
+      "circuit": "/assets/examples/library/parallel-3.txt"
+    },
+    {
+      "id": "combine-1",
+      "category": "combine",
+      "title": {
+        "zh-Hant": "先串聯再並聯",
+        "en": "Series, then a parallel pair"
+      },
+      "description": {
+        "zh-Hant": "電流先全部經過左邊一隻電阻，再到接點分開，走上下兩隻並聯電阻。合上後先看共用的那一段，再看分岔。可跟下一圖對比：同一類型、另一種畫法。",
+        "en": "All current first goes through the left resistor, then splits at a junction through two resistors in parallel. Close the switch: watch the shared series part, then the split. The next card is the same idea with a different layout."
+      },
+      "image": "/diagrams/combine-1.jpg",
+      "circuit": "/assets/examples/library/combine-1.txt"
+    },
+    {
+      "id": "combine-2",
+      "category": "combine",
+      "title": {
+        "zh-Hant": "左邊串聯、另外兩隻並聯",
+        "en": "Series on the left, parallel pair"
+      },
+      "description": {
+        "zh-Hant": "左邊直放的電阻是串聯，所有電流都經過它。中間那隻與底邊那隻並聯。與上一圖同一類型，只是元件換了邊。",
+        "en": "The upright resistor on the left is in series: every current path goes through it. The middle resistor and the bottom resistor are in parallel. Same combination as the previous card, with the parts on different sides."
+      },
+      "image": "/diagrams/combine-2.jpg",
+      "circuit": "/assets/examples/library/combine-2.txt"
+    },
+    {
+      "id": "combine-3",
+      "category": "combine",
+      "title": {
+        "zh-Hant": "五電阻橋式綜合",
+        "en": "Five-resistor bridge"
+      },
+      "description": {
+        "zh-Hant": "四邊各一隻電阻，再加一條對角，底邊是開關和電池。合上後電流可以走多條路，包括對角那一條。這是較複雜的綜合網，適合對比前兩圖的「先串再並」。",
+        "en": "Four resistors form a loop, a fifth sits on the diagonal, and the switch and battery are on the bottom. Close the switch: current can take several paths, including the diagonal. This is a richer network than the two simpler series-then-parallel cards."
+      },
+      "image": "/diagrams/combine-3.jpg",
+      "circuit": "/assets/examples/library/combine-3.txt"
+    }
+  ]
+}

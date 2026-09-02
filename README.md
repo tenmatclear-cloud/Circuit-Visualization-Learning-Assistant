@@ -5,7 +5,7 @@
 ## 主要功能
 
 - 雙語前端介面：繁體中文 / English
-- Poe API 後端代理，API key 不會暴露在瀏覽器
+- Poe API 後端代理；可在頁面右上角填入 API key，或改用本機設定檔／環境變數
 - 文字需求及電路圖片上載
 - `Generate Circuit`：生成 Falstad 專用代碼
 - `Generate Guide`：根據已生成代碼輸出視覺化教學指引
@@ -28,6 +28,7 @@
 ## 專案結構
 
 - `index.html`: 主畫面
+- `examples.html`: 範例電路頁（九張現成圖與 Falstad 代碼）
 - `styles.css`: 視覺樣式
 - `app.js`: 前端互動、圖片壓縮、雙語切換、Falstad 載入、Raw AI Output 顯示
 - `server.rb`: Ruby 後端代理、Poe API 呼叫、schema compiler、背景生成工作
@@ -39,7 +40,9 @@
 
 ## 本地設定
 
-本機金鑰只放在 `server-config.local.json`。這個檔已被 `.gitignore` 排除，不要把它 commit 到 GitHub。
+最方便的做法是打開網站後，按右上角「API key」，把 Poe 金鑰貼進去。金鑰只存在這個瀏覽器，生成時才送到本站後端。
+
+本機也可以把金鑰放在 `server-config.local.json`。這個檔已被 `.gitignore` 排除，不要把它 commit 到 GitHub。
 
 ```bash
 cp server-config.example.json server-config.local.json
@@ -57,7 +60,7 @@ cp server-config.example.json server-config.local.json
 
 說明：
 
-- `poe_api_key`: 只寫在 `server-config.local.json`，或用環境變數 `POE_API_KEY`
+- `poe_api_key`: 可選。頁面右上角已可填入；也可寫在 `server-config.local.json`，或用環境變數 `POE_API_KEY`
 - `poe_model`: 本機預設 `gemini-3.7-flash`；相片仍失敗時可改回 `gemini-3.1-pro` 對照
 - `port`: 本地 server port，預設 `8080`
 - Render 上線請用 Environment 的 `POE_API_KEY`，不要把本機 json 上傳到伺服器
@@ -97,7 +100,8 @@ http://localhost:8080
   "promptText": "兩個電阻串聯",
   "imageDataUrl": "",
   "outputLanguage": "zh-Hant",
-  "falstadCode": ""
+  "falstadCode": "",
+  "apiKey": ""
 }
 ```
 

@@ -73,6 +73,18 @@ def load_config
   config
 end
 
+def usable_api_key?(value)
+  key = value.to_s.strip
+  !key.empty? && key != "PASTE_YOUR_POE_API_KEY_HERE"
+end
+
+def resolve_api_key(request_key, server_key)
+  return request_key.to_s.strip if usable_api_key?(request_key)
+  return server_key.to_s.strip if usable_api_key?(server_key)
+
+  nil
+end
+
 def parse_data_url(data_url)
   match = data_url.match(%r{\Adata:(?<mime>[-\w.+/]+);base64,(?<data>.+)\z})
   return nil unless match
@@ -1436,7 +1448,7 @@ server.mount_proc "/api/health" do |_req, res|
     body: {
       ok: true,
       provider: "poe-api",
-      has_api_key: !config["poe_api_key"].to_s.empty? && config["poe_api_key"] != "PASTE_YOUR_POE_API_KEY_HERE",
+      has_api_key: usable_api_key?(config["poe_api_key"]),
       model: config["poe_model"]
     }
   )
@@ -1445,12 +1457,6 @@ end
 server.mount_proc "/api/generate" do |req, res|
   unless req.request_method == "POST"
     json_response(res, status: 405, body: { error: "Method not allowed" })
-    next
-  end
-
-  api_key = config["poe_api_key"].to_s
-  if api_key.empty? || api_key == "PASTE_YOUR_POE_API_KEY_HERE"
-    json_response(res, status: 500, body: { error: "請先在 server-config.local.json 填入 Poe API key。" })
     next
   end
 
@@ -1480,6 +1486,12 @@ server.mount_proc "/api/generate" do |req, res|
       else
         json_response(res, status: 200, body: job)
       end
+      next
+    end
+
+    api_key = resolve_api_key(request_body["apiKey"], config["poe_api_key"])
+    unless api_key
+      json_response(res, status: 400, body: { error: "請先在網頁右上角填入 Poe API key。" })
       next
     end
 
