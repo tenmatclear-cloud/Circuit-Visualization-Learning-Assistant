@@ -350,6 +350,8 @@ let uploadedImageDataUrl = "";
 let falstadSim = null;
 let simulatorPollTimer = null;
 let currentFeedbackKey = "helperText";
+let currentApiStatus = "idle";
+let currentSimulatorStatus = "waiting";
 let currentLoadingTask = null;
 let activeJobId = "";
 let stopRequested = false;
@@ -520,6 +522,9 @@ function renderLanguage() {
   if (healthBannerKey) {
     setHealthBanner(t(healthBannerKey), true);
   }
+
+  setApiStatus(currentApiStatus);
+  setSimulatorStatus(currentSimulatorStatus);
 }
 
 function parseExampleMarkdown(markdown) {
@@ -1096,10 +1101,12 @@ async function checkBackendHealth() {
 }
 
 function setApiStatus(state) {
+  currentApiStatus = state;
   els.apiStatus.textContent = t(`apiStatus.${state}`);
 }
 
 function setSimulatorStatus(state) {
+  currentSimulatorStatus = state;
   els.simulatorStatus.textContent = t(`simulatorStatus.${state}`);
 }
 
