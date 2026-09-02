@@ -460,6 +460,7 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
         "For real photos, use photo-layout coordinates: normalized decimals from 0 to 1 relative to the photo, preserving photographed positions. The server will snap them onto the Falstad 16-grid when compiling Falstad code.",
         "For each real photographed component, provide bbox [left, top, right, bottom], orientation, and either x1/y1/x2/y2 terminal coordinates or terminals {a:[x,y], b:[x,y]}.",
         "Use x1/y1/x2/y2 for the two electrical terminals. Photos may use 0-to-1 values; text-only requests may already use Falstad 16-grid integers. Do not require schema coordinates themselves to be multiples of 16.",
+        "For battery, Falstad polarity is required: x1/y1 is the negative terminal (short plate), x2/y2 is the positive terminal (long plate). In textbook diagrams the long line is positive. Do not use left-to-right or top-to-bottom order instead of polarity. If you also give terminals, use {negative:[x,y], positive:[x,y]}. Do not rely on bbox alone for a battery.",
         "The JSON must use only these component types: wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter.",
         "Use components only. Do not output raw Falstad dump lines.",
         "The compiled Falstad code must use integer coordinates that are multiples of 16. The server performs that snap for every input, text or photo.",
@@ -485,6 +486,7 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
         "如果是真實相片，請使用 photo-layout coordinates：用 0 至 1 的小數表示相對於相片的位置，保留相片中的相對擺位。server 編譯 Falstad code 時會自動 snap 到 16 格。",
         "每個相片中的實物 component 請提供 bbox [left, top, right, bottom]、orientation，以及 x1/y1/x2/y2 端子座標或 terminals {a:[x,y], b:[x,y]}。",
         "x1/y1/x2/y2 代表兩個電氣端子。相片可用 0 至 1 normalized 座標；純文字需求可直接用 Falstad 16 格整數。schema 本身不必是 16 的倍數。",
+        "battery 必須遵守 Falstad 極向：x1/y1 是負極（短極板），x2/y2 是正極（長極板）。課本圖中長線是正極。不要用由左到右或由上到下代替極向。若同時提供 terminals，請用 {negative:[x,y], positive:[x,y]}。電池不要只靠 bbox。",
         "JSON 只可使用這些元件類型：wire、battery、resistor、internal_resistance、variable_resistor、lamp、switch、ammeter、voltmeter。",
         "請只輸出 schema，不要輸出原始 Falstad dump 代碼。",
         "最終 Falstad code 的每個座標都必須是整數，而且一定要是 16 的倍數。無論文字或相片輸入，都由 server 負責 snap。",
@@ -530,6 +532,7 @@ def build_circuit_schema_retry_payload(prompt_text, image_data_url, output_langu
         "The top-level object must contain components.",
         "For photos, preserve photographed positions using normalized 0-to-1 coordinates. Prefer bbox [left, top, right, bottom], orientation, and terminal coordinates x1/y1/x2/y2 or terminals {a:[x,y], b:[x,y]}.",
         "x1/y1/x2/y2 are the two electrical terminals. Use normalized photo coordinates or 16-grid Falstad coordinates.",
+        "For battery, x1/y1 must be the negative/short plate and x2/y2 the positive/long plate. Prefer terminals {negative:[x,y], positive:[x,y]}.",
         "Use only these types: wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter.",
         "All compiled components must be horizontal or vertical. The server will snap schema coordinates to Falstad multiples of 16 for both text and photo inputs.",
         "For the photo, trace only connected terminals and leads; ignore loose unused leads and background objects.",
@@ -543,6 +546,7 @@ def build_circuit_schema_retry_payload(prompt_text, image_data_url, output_langu
         "最外層 object 必須包含 components。",
         "如果是相片，請用 0 至 1 normalized 座標保留相片擺位。優先提供 bbox [left, top, right, bottom]、orientation，以及 x1/y1/x2/y2 或 terminals {a:[x,y], b:[x,y]} 端子座標。",
         "x1/y1/x2/y2 代表兩個電氣端子。可用 normalized 相片座標或 16 倍數 Falstad 座標。",
+        "battery 的 x1/y1 必須是負極（短極板），x2/y2 必須是正極（長極板）。優先使用 terminals {negative:[x,y], positive:[x,y]}。",
         "只可使用這些 type：wire、battery、resistor、internal_resistance、variable_resistor、lamp、switch、ammeter、voltmeter。",
         "編譯後的元件必須水平或垂直；無論文字或相片，server 都會把 schema 座標 snap 成 Falstad 16 倍數整數。",
         "如果是相片，只追蹤真正連接的端子與導線，忽略未接上的鬆散導線和背景物件。",
@@ -577,7 +581,7 @@ def build_circuit_code_payload(prompt_text, image_data_url, output_language, mod
     output_language.to_s == "en" ? "Every X and Y coordinate in the Falstad code must be an integer multiple of 16, whether the user provided text or a photo." : "無論使用者輸入文字或相片，Falstad code 裡每一個 X 與 Y 座標都必須是 16 的倍數整數。",
     output_language.to_s == "en" ? "Use legal Falstad elements only. Use 6V or 9V batteries when needed." : "只使用合法的 Falstad 元件；如需要電池，請用 6V 或 9V。",
     output_language.to_s == "en" ? "Never use shorthand element lines. Use these exact formats: battery `v x1 y1 x2 y2 0 0 40 voltage 0 0 0.5`; switch `s x1 y1 x2 y2 0 position false`; resistor `r x1 y1 x2 y2 0 resistance`; wire `w x1 y1 x2 y2 0`." : "絕不可使用簡寫元件行。請使用這些完整格式：電池 `v x1 y1 x2 y2 0 0 40 voltage 0 0 0.5`；開關 `s x1 y1 x2 y2 0 position false`；電阻 `r x1 y1 x2 y2 0 resistance`；導線 `w x1 y1 x2 y2 0`。",
-    output_language.to_s == "en" ? "For example, a 9V battery must be `v 160 240 160 160 0 0 40 9 0 0 0.5`, not `v 160 240 160 160 0 9`." : "例如 9V 電池必須寫成 `v 160 240 160 160 0 0 40 9 0 0 0.5`，不可寫成 `v 160 240 160 160 0 9`。",
+    output_language.to_s == "en" ? "For a battery, (x1,y1) is the negative short plate and (x2,y2) is the positive long plate. For example, a 9V battery must be `v 160 240 160 160 0 0 40 9 0 0 0.5`, not `v 160 240 160 160 0 9`." : "電池的 (x1,y1) 是負極短極板，(x2,y2) 是正極長極板。例如 9V 電池必須寫成 `v 160 240 160 160 0 0 40 9 0 0 0.5`，不可寫成 `v 160 240 160 160 0 9`。",
     output_language.to_s == "en" ? "If you use an ammeter, use Falstad ammeter code with the circular symbol enabled. If you use a voltmeter, use the circular voltmeter/probe symbol and a high resistance so it behaves like a meter in class diagrams." : "如果使用安培計，請使用帶圓形符號的 Falstad ammeter 代碼；如果使用伏特計，請使用帶圓形符號的 voltmeter/probe，並設定高電阻，使其符合課堂圖示與理想伏特計用途。",
     output_language.to_s == "en" ? "Do not add x text labels, arrows, callouts, or decorative helper lines unless the user explicitly asks for them." : "除非使用者明確要求，否則不要加入 x 文字標示、箭頭、指示線或裝飾性輔助圖形。",
     compact ? (output_language.to_s == "en" ? "Prefer the simplest valid layout that preserves the intended topology." : "請優先使用最簡潔、但仍保留原始拓撲的有效佈局。") : (output_language.to_s == "en" ? "Preserve the intended topology faithfully and keep the layout tidy." : "請忠實保留原有拓撲，並保持佈局整齊。"),
@@ -689,6 +693,44 @@ def coordinate_pair(value)
   nil
 end
 
+BATTERY_NEGATIVE_KEYS = %w[negative minus black neg -].freeze
+BATTERY_POSITIVE_KEYS = %w[positive plus red pos +].freeze
+
+def lookup_named_coordinate(source, keys)
+  return nil unless source.is_a?(Hash)
+
+  keyed = source.transform_keys { |key| key.to_s.downcase }
+  keys.each do |key|
+    pair = coordinate_pair(keyed[key])
+    return pair if pair
+  end
+  nil
+end
+
+def polarity_terminal_pair(component)
+  negative = lookup_named_coordinate(component, BATTERY_NEGATIVE_KEYS)
+  positive = lookup_named_coordinate(component, BATTERY_POSITIVE_KEYS)
+  if component["terminals"].is_a?(Hash)
+    negative ||= lookup_named_coordinate(component["terminals"], BATTERY_NEGATIVE_KEYS)
+    positive ||= lookup_named_coordinate(component["terminals"], BATTERY_POSITIVE_KEYS)
+  end
+  return [negative, positive] if negative && positive
+
+  nil
+end
+
+def apply_battery_polarity!(component)
+  pair = polarity_terminal_pair(component)
+  return component unless pair
+
+  negative, positive = pair
+  component["x1"] = negative[0]
+  component["y1"] = negative[1]
+  component["x2"] = positive[0]
+  component["y2"] = positive[1]
+  component
+end
+
 def terminal_pair_from_component(component)
   terminals = component["terminals"]
   return nil unless terminals.is_a?(Hash)
@@ -698,9 +740,6 @@ def terminal_pair_from_component(component)
     %w[a b],
     %w[t1 t2],
     %w[terminal1 terminal2],
-    %w[positive negative],
-    %w[plus minus],
-    %w[red black],
     %w[left right],
     %w[top bottom]
   ]
@@ -745,9 +784,6 @@ def apply_schema_endpoint_aliases!(component)
     ["terminal1", "terminal2"],
     ["t1", "t2"],
     ["a", "b"],
-    ["positive", "negative"],
-    ["plus", "minus"],
-    ["red", "black"],
     ["left", "right"],
     ["top", "bottom"]
   ]
@@ -834,6 +870,7 @@ def normalize_schema_component(component, index)
   apply_schema_endpoint_aliases!(normalized)
   normalized["type"] = normalize_component_type(normalized["type"])
   raise "第 #{index + 1} 個元件缺少有效 type。" unless SUPPORTED_CIRCUIT_COMPONENT_TYPES.include?(normalized["type"])
+  apply_battery_polarity!(normalized) if normalized["type"] == "battery"
 
   %w[x1 y1 x2 y2].each do |key|
     normalized[key] = schema_coordinate!(normalized[key], "元件 #{index + 1} 的 #{key}")
@@ -864,6 +901,7 @@ end
 
 def compile_battery_line(component)
   voltage = positive_number(component["voltage"], 9)
+  # Falstad DC battery: (x1,y1) = negative short plate, (x2,y2) = positive long plate.
   "v #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0 0 40 #{voltage} 0 0 0.5"
 end
 
@@ -1372,6 +1410,21 @@ server.mount_proc "/examples.md" do |_req, res|
 
   res.status = 200
   res["Content-Type"] = "text/markdown; charset=utf-8"
+  res["Cache-Control"] = "no-store"
+  res.body = path.read
+end
+
+server.mount_proc "/manual.md" do |_req, res|
+  path = ROOT.join("說明書.md")
+  unless path.exist?
+    res.status = 404
+    res["Content-Type"] = "text/plain; charset=utf-8"
+    res.body = "說明書.md not found"
+    next
+  end
+
+  res.status = 200
+  res["Content-Type"] = "text/plain; charset=utf-8"
   res["Cache-Control"] = "no-store"
   res.body = path.read
 end

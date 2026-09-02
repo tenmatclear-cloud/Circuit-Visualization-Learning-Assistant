@@ -27,6 +27,33 @@
         </div>
       </header>
 
+      <details class="quick-guide" id="quickGuide" open>
+        <summary>
+          <span class="quick-guide-kicker" id="quickGuideKicker">使用說明</span>
+          <strong id="quickGuideTitle">四步開始</strong>
+        </summary>
+        <div class="quick-guide-body">
+          <ol class="quick-guide-steps">
+            <li id="quickGuideStep1">
+              在左側輸入文字，或上載電路圖／相片。可按「串聯示例」「並聯示例」，或按「載入範例圖」。
+            </li>
+            <li id="quickGuideStep2">按「生成電路」，等待右側模擬器出現電路。</li>
+            <li id="quickGuideStep3">
+              看黃色小點（電流）和顏色深淺（電壓）。可點開關，或拖曳元件改正線路。
+            </li>
+            <li id="quickGuideStep4">需要課堂提問時，再開「教學指引」或「解題教學」。</li>
+          </ol>
+          <div class="quick-guide-aside">
+            <h3 id="quickGuideTipsTitle">使用建議</h3>
+            <ul>
+              <li id="quickGuideTip1">文字愈具體愈好：寫明電壓、串聯或並聯、燈泡還是電阻。</li>
+              <li id="quickGuideTip2">相片要清楚，每個元件的接線端子都要看得見。</li>
+              <li id="quickGuideTip3">線路歪了，直接在模擬器拖曳即可，一般不必改代碼。</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
       <div class="health-banner hidden" id="healthBanner" hidden></div>
 
       <main class="workspace">
@@ -41,7 +68,10 @@
 
           <div class="field input-mode" id="promptField">
             <div class="field-heading">
-              <span id="promptLabel">文字需求</span>
+              <div class="field-heading-lead">
+                <span id="promptLabel">文字需求</span>
+                <div class="example-buttons" id="exampleButtons" role="group" aria-label="Examples"></div>
+              </div>
               <div class="field-heading-actions">
                 <span class="mode-pill hidden" id="promptModePill">使用文字</span>
                 <button class="ghost-button small hidden" id="clearPromptButton" type="button">
@@ -59,7 +89,12 @@
           <div class="field input-mode" id="imageField">
             <div class="field-heading">
               <label id="imageLabel" for="imageInput">電路圖圖片（可選）</label>
-              <span class="mode-pill hidden" id="imageModePill">使用圖片</span>
+              <div class="field-heading-actions">
+                <button class="ghost-button small" id="loadSampleCircuitButton" type="button">
+                  載入範例圖
+                </button>
+                <span class="mode-pill hidden" id="imageModePill">使用圖片</span>
+              </div>
             </div>
             <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" />
           </div>
@@ -72,12 +107,11 @@
           </div>
 
           <div class="action-row">
-            <button class="primary-button" id="generateCircuitButton" type="button">
-              生成電路
-            </button>
-            <div class="example-buttons" id="exampleButtons" role="group" aria-label="Examples"></div>
             <button class="danger-button hidden" id="stopGenerationButton" type="button">
               STOP
+            </button>
+            <button class="primary-button" id="generateCircuitButton" type="button">
+              生成電路
             </button>
           </div>
 

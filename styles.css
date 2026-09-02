@@ -143,6 +143,101 @@ h3 {
   line-height: 1.4;
 }
 
+.quick-guide {
+  margin-top: 16px;
+  border-radius: var(--radius-xl);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  background: linear-gradient(135deg, rgba(255, 249, 238, 0.94), rgba(247, 251, 250, 0.82));
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.quick-guide > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  padding: 14px 20px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.quick-guide > summary::-webkit-details-marker {
+  display: none;
+}
+
+.quick-guide-kicker {
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.quick-guide > summary strong {
+  font-family: "Iowan Old Style", "Palatino Linotype", "PingFang TC", serif;
+  font-size: 1.15rem;
+}
+
+.quick-guide > summary strong::before {
+  content: "▾ ";
+  color: var(--muted);
+  font-family: inherit;
+}
+
+.quick-guide:not([open]) > summary strong::before {
+  content: "▸ ";
+}
+
+.quick-guide-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(240px, 0.8fr);
+  gap: 8px 28px;
+  padding: 0 20px 18px;
+}
+
+.quick-guide-steps,
+.quick-guide-aside ul {
+  margin: 0;
+  padding-left: 1.2em;
+  color: var(--ink);
+  line-height: 1.6;
+}
+
+.quick-guide-steps li + li,
+.quick-guide-aside li + li {
+  margin-top: 8px;
+}
+
+.quick-guide-aside h3 {
+  margin-bottom: 8px;
+  color: var(--teal);
+  font-size: 0.95rem;
+}
+
+.quick-guide-aside ul {
+  color: var(--muted);
+}
+
+.field-heading-lead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+a.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+a.ghost-button:hover {
+  transform: translateY(-1px);
+}
+
 .health-banner {
   margin: 16px 0 0;
   padding: 12px 16px;
@@ -329,6 +424,7 @@ details.output-card textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -504,7 +600,7 @@ button:hover {
 
 .action-row {
   flex-wrap: nowrap;
-  justify-content: flex-start;
+  justify-content: flex-end;
 }
 
 .example-buttons {
@@ -589,6 +685,7 @@ code {
 
 body.is-presenting .hero-copy,
 body.is-presenting .eyebrow,
+body.is-presenting .quick-guide,
 body.is-presenting .control-panel,
 body.is-presenting .tips-card,
 body.is-presenting .health-banner,
@@ -650,6 +747,12 @@ body.is-presenting #falstadFrame {
   body.is-presenting .simulator-stage,
   body.is-presenting #falstadFrame {
     min-height: calc(100vh - 8rem);
+  }
+}
+
+@media (max-width: 880px) {
+  .quick-guide-body {
+    grid-template-columns: 1fr;
   }
 }
 

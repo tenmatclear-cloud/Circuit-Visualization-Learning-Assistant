@@ -12,6 +12,7 @@ const APP_CONFIG = {
   teachingCurrentSpeed: 42,
   teachingFalstadHeader: "$ 1 0.000005 10.20027730826997 42 5 43",
   examplesEndpoint: "/examples.md",
+  sampleCircuitImage: "/assets/examples/sample-circuit.jpg",
 };
 
 const translations = {
@@ -19,6 +20,17 @@ const translations = {
     heroEyebrow: "Series / Parallel Learning Studio",
     heroTitle: "電路視覺化教學助手",
     heroCopy: "用文字或電路圖片生成電路，再觀察電流、電壓與串聯／並聯的分別。",
+    quickGuideKicker: "使用說明",
+    quickGuideTitle: "四步開始",
+    quickGuideStep1: "在左側輸入文字，或上載電路圖／相片。可按「串聯示例」「並聯示例」，或按「載入範例圖」。",
+    quickGuideStep2: "按「生成電路」，等待右側模擬器出現電路。",
+    quickGuideStep3: "看黃色小點（電流）和顏色深淺（電壓）。可點開關，或拖曳元件改正線路。",
+    quickGuideStep4: "需要課堂提問時，再開「教學指引」或「解題教學」。",
+    quickGuideTipsTitle: "使用建議",
+    quickGuideTip1: "文字愈具體愈好：寫明電壓、串聯或並聯、燈泡還是電阻。",
+    quickGuideTip2: "相片要清楚，每個元件的接線端子都要看得見。",
+    quickGuideTip3: "線路歪了，直接在模擬器拖曳即可，一般不必改代碼。",
+    loadSampleCircuitButton: "載入範例圖",
     step1Label: "開始",
     inputSectionTitle: "輸入需求",
     promptLabel: "文字需求",
@@ -114,6 +126,8 @@ const translations = {
       simulatorExportUnavailable: "目前未能從右側模擬器取得資料。",
       simulatorExported: "已把右側電路匯出到進階代碼框",
       simulatorExportFailed: "匯出失敗。",
+      sampleImageLoaded: "已載入範例電路圖。可直接按「生成電路」。",
+      sampleImageFailed: "未能載入範例電路圖。請再試一次，或自行上載圖片。",
     },
   },
   en: {
@@ -121,6 +135,19 @@ const translations = {
     heroTitle: "Circuit Visualization Learning Assistant",
     heroCopy:
       "Generate a circuit from text or a photo, then watch current, voltage, and the difference between series and parallel.",
+    quickGuideKicker: "How to use",
+    quickGuideTitle: "Four steps",
+    quickGuideStep1:
+      "Type a request on the left, or upload a circuit image. You can also use Series / Parallel, or Load sample image.",
+    quickGuideStep2: "Click Generate Circuit and wait for the circuit to appear on the right.",
+    quickGuideStep3:
+      "Watch the yellow dots (current) and the color shading (voltage). Click a switch, or drag a part to fix a wire.",
+    quickGuideStep4: "If you need classroom questions, open Teaching Guide or Tutoring Draft.",
+    quickGuideTipsTitle: "Tips",
+    quickGuideTip1: "Be specific: say the voltage, series or parallel, and lamps or resistors.",
+    quickGuideTip2: "Keep photos clear so every terminal is visible.",
+    quickGuideTip3: "If a wire looks wrong, drag it in the simulator. You usually do not need to edit code.",
+    loadSampleCircuitButton: "Load sample image",
     step1Label: "Start",
     inputSectionTitle: "Input Request",
     promptLabel: "Text Request",
@@ -218,6 +245,8 @@ const translations = {
       simulatorExportUnavailable: "Unable to read data from the simulator right now.",
       simulatorExported: "The current circuit has been exported to the advanced code box.",
       simulatorExportFailed: "Export failed.",
+      sampleImageLoaded: "The sample circuit image is ready. Click Generate Circuit.",
+      sampleImageFailed: "The sample image could not be loaded. Try again, or upload your own image.",
     },
   },
 };
@@ -226,6 +255,17 @@ const els = {
   heroEyebrow: document.getElementById("heroEyebrow"),
   heroTitle: document.getElementById("heroTitle"),
   heroCopy: document.getElementById("heroCopy"),
+  quickGuideKicker: document.getElementById("quickGuideKicker"),
+  quickGuideTitle: document.getElementById("quickGuideTitle"),
+  quickGuideStep1: document.getElementById("quickGuideStep1"),
+  quickGuideStep2: document.getElementById("quickGuideStep2"),
+  quickGuideStep3: document.getElementById("quickGuideStep3"),
+  quickGuideStep4: document.getElementById("quickGuideStep4"),
+  quickGuideTipsTitle: document.getElementById("quickGuideTipsTitle"),
+  quickGuideTip1: document.getElementById("quickGuideTip1"),
+  quickGuideTip2: document.getElementById("quickGuideTip2"),
+  quickGuideTip3: document.getElementById("quickGuideTip3"),
+  loadSampleCircuitButton: document.getElementById("loadSampleCircuitButton"),
   langZhButton: document.getElementById("langZhButton"),
   langEnButton: document.getElementById("langEnButton"),
   step1Label: document.getElementById("step1Label"),
@@ -327,6 +367,7 @@ els.langZhButton.addEventListener("click", () => setLanguage("zh-Hant"));
 els.langEnButton.addEventListener("click", () => setLanguage("en"));
 els.imageInput.addEventListener("change", handleImageUpload);
 els.removeImageButton.addEventListener("click", clearImage);
+els.loadSampleCircuitButton?.addEventListener("click", useSampleCircuitImage);
 els.clearPromptButton.addEventListener("click", clearPrompt);
 els.userPrompt.addEventListener("input", syncInputModes);
 els.exampleButtons.addEventListener("click", (event) => {
@@ -407,6 +448,17 @@ function renderLanguage() {
   els.heroEyebrow.textContent = t("heroEyebrow");
   els.heroTitle.textContent = t("heroTitle");
   els.heroCopy.textContent = t("heroCopy");
+  els.quickGuideKicker.textContent = t("quickGuideKicker");
+  els.quickGuideTitle.textContent = t("quickGuideTitle");
+  els.quickGuideStep1.textContent = t("quickGuideStep1");
+  els.quickGuideStep2.textContent = t("quickGuideStep2");
+  els.quickGuideStep3.textContent = t("quickGuideStep3");
+  els.quickGuideStep4.textContent = t("quickGuideStep4");
+  els.quickGuideTipsTitle.textContent = t("quickGuideTipsTitle");
+  els.quickGuideTip1.textContent = t("quickGuideTip1");
+  els.quickGuideTip2.textContent = t("quickGuideTip2");
+  els.quickGuideTip3.textContent = t("quickGuideTip3");
+  els.loadSampleCircuitButton.textContent = t("loadSampleCircuitButton");
   els.step1Label.textContent = t("step1Label");
   els.inputSectionTitle.textContent = t("inputSectionTitle");
   els.promptLabel.textContent = t("promptLabel");
@@ -461,6 +513,8 @@ function renderLanguage() {
 
   if (currentFeedbackKey === "helperText") {
     setFeedback(t("helperText"), false, "helperText");
+  } else if (currentFeedbackKey && currentFeedbackKey !== "runtime") {
+    setFeedback(t(currentFeedbackKey), false, currentFeedbackKey);
   }
 
   if (healthBannerKey) {
@@ -574,21 +628,25 @@ function handleImageUpload(event) {
     return;
   }
 
+  applyUploadedFile(file);
+}
+
+function applyUploadedFile(file) {
   if (!APP_CONFIG.allowedImageTypes.includes(file.type)) {
     clearImage();
     setFeedback(t("feedback.invalidImageType"), true);
     setApiStatus("error");
-    return;
+    return Promise.reject(new Error("invalid-image-type"));
   }
 
   if (file.size > APP_CONFIG.maxUploadBytes) {
     clearImage();
     setFeedback(t("feedback.imageTooLarge"), true);
     setApiStatus("error");
-    return;
+    return Promise.reject(new Error("image-too-large"));
   }
 
-  optimizeImageForUpload(file)
+  return optimizeImageForUpload(file)
     .catch(async (error) => {
       console.warn("Image optimization failed, falling back to the original upload.", error);
       return readFileAsDataUrl(file);
@@ -604,7 +662,25 @@ function handleImageUpload(event) {
       clearImage();
       setFeedback(t("feedback.imageReadFailed"), true);
       setApiStatus("error");
+      throw error;
     });
+}
+
+async function useSampleCircuitImage() {
+  try {
+    const response = await fetch(`${APP_CONFIG.sampleCircuitImage}?t=${Date.now()}`);
+    if (!response.ok) {
+      throw new Error(`Unable to fetch sample circuit (${response.status})`);
+    }
+
+    const blob = await response.blob();
+    const type = APP_CONFIG.allowedImageTypes.includes(blob.type) ? blob.type : "image/jpeg";
+    await applyUploadedFile(new File([blob], "sample-circuit.jpg", { type }));
+    setFeedback(t("feedback.sampleImageLoaded"), false, "feedback.sampleImageLoaded");
+  } catch (error) {
+    console.warn("Unable to load the sample circuit image.", error);
+    setFeedback(t("feedback.sampleImageFailed"), true);
+  }
 }
 
 function clearImage() {
