@@ -36,8 +36,8 @@ SUPPORTED_CIRCUIT_COMPONENT_TYPES = %w[
 FALSTAD_HEADER = "$ 1 0.000005 10.20027730826997 42 12 43"
 PHOTO_LAYOUT_ORIGIN_X = 96
 PHOTO_LAYOUT_ORIGIN_Y = 64
-PHOTO_LAYOUT_WIDTH = 800
-PHOTO_LAYOUT_HEIGHT = 640
+PHOTO_LAYOUT_WIDTH = 384
+PHOTO_LAYOUT_HEIGHT = 320
 GRID_SIZE = 16
 
 class GenerationError < StandardError
@@ -476,7 +476,10 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
         "The JSON must use only these component types: wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter.",
         "Use components only. Do not output raw Falstad dump lines.",
         "The compiled Falstad code must use integer coordinates that are multiples of 16. The server performs that snap for every input, text or photo.",
-        "Every wire, resistor, lamp, switch, ammeter, voltmeter, battery, and internal_resistance must be horizontal or vertical.",
+        "Prefer horizontal or vertical wires and parts. A resistor, lamp, or wire MAY be diagonal when the source has a diagonal branch, such as a bridge or Wheatstone circuit.",
+        "Diagonal terminals must be the two electrical junctions, never the drawn symbol box. Example: a bridge resistor from top-left to bottom-right is {\"type\":\"resistor\",\"x1\":160,\"y1\":128,\"x2\":448,\"y2\":256,\"orientation\":\"diagonal\"}.",
+        "Falstad joins parts only when endpoints share identical coordinates. A T-junction must split the through wire at the join. Crossing lines without a junction dot are not connected. The server merges nearby endpoints and splits wires at joins.",
+        "If a textbook switch is drawn open, set state to open; if closed, set state to closed. When unsure, use open.",
         "Use wire components to build corners, rectangles, and branches.",
         "For real laboratory photos, first convert the physical setup into a clean schematic: trace only connected terminals and leads; ignore tables, hands, shadows, unused loose wires, and background objects.",
         "Map common school apparatus to the schema: cell holders or power packs become battery, bulb holders become lamp, crocodile-clip leads become wire, rheostats become variable_resistor, A/V meters become ammeter or voltmeter, and switch keys become switch.",
@@ -502,7 +505,10 @@ def build_circuit_schema_payload(prompt_text, image_data_url, output_language, m
         "JSON 只可使用這些元件類型：wire、battery、resistor、internal_resistance、variable_resistor、lamp、switch、ammeter、voltmeter。",
         "請只輸出 schema，不要輸出原始 Falstad dump 代碼。",
         "最終 Falstad code 的每個座標都必須是整數，而且一定要是 16 的倍數。無論文字或相片輸入，都由 server 負責 snap。",
-        "wire、resistor、lamp、switch、ammeter、voltmeter、battery、internal_resistance 都必須保持水平或垂直。",
+        "導線和大多數元件請盡量保持水平或垂直。若原圖有對角支路（橋式／Wheatstone），resistor、lamp、wire 可以對角。",
+        "對角元件的兩個端子必須是兩個電氣接點，絕對不要用符號方框的 bbox 當端子。例如左上接到右下的橋電阻：{\"type\":\"resistor\",\"x1\":160,\"y1\":128,\"x2\":448,\"y2\":256,\"orientation\":\"diagonal\"}。",
+        "Falstad 只在端點座標完全相同時才算接駁。T 形分岔要把穿過的導線在接點拆開；交叉而無圓點不相接。server 會合併附近接點，並把壓在導線中段的接點拆開。",
+        "課本圖開關如是打開，請設 state 為 open；合上則為 closed。不確定時用 open。",
         "所有轉角、長方形框架、分支都請用 wire 元件補齊。",
         "如果輸入是真實實驗室相片，請先把實物連接轉成乾淨的電路圖：只追蹤真正連接的端子與導線，忽略桌面、手、陰影、未接上的鬆散導線和背景物件。",
         "請把常見學校儀器對應到 schema：電池盒或電源供應器是 battery，燈座/燈泡是 lamp，鱷魚夾導線是 wire，滑動變阻器/變阻器是 variable_resistor，A/V 錶是 ammeter 或 voltmeter，開關掣是 switch。",
@@ -546,7 +552,7 @@ def build_circuit_schema_retry_payload(prompt_text, image_data_url, output_langu
         "x1/y1/x2/y2 are the two electrical terminals. Use normalized photo coordinates or 16-grid Falstad coordinates.",
         "For battery, x1/y1 must be the negative/short plate and x2/y2 the positive/long plate. Prefer terminals {negative:[x,y], positive:[x,y]}.",
         "Use only these types: wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter.",
-        "All compiled components must be horizontal or vertical. The server will snap schema coordinates to Falstad multiples of 16 for both text and photo inputs.",
+        "Prefer horizontal or vertical layout, but keep true diagonal branches. Diagonal terminals must be the two junctions, not the symbol bbox. The server snaps coordinates to multiples of 16, merges nearby nodes, and splits wires at T-junctions.",
         "For the photo, trace only connected terminals and leads; ignore loose unused leads and background objects.",
         "Do not output Falstad dump code."
       ].join("\n")
@@ -560,7 +566,7 @@ def build_circuit_schema_retry_payload(prompt_text, image_data_url, output_langu
         "x1/y1/x2/y2 代表兩個電氣端子。可用 normalized 相片座標或 16 倍數 Falstad 座標。",
         "battery 的 x1/y1 必須是負極（短極板），x2/y2 必須是正極（長極板）。優先使用 terminals {negative:[x,y], positive:[x,y]}。",
         "只可使用這些 type：wire、battery、resistor、internal_resistance、variable_resistor、lamp、switch、ammeter、voltmeter。",
-        "編譯後的元件必須水平或垂直；無論文字或相片，server 都會把 schema 座標 snap 成 Falstad 16 倍數整數。",
+        "佈局盡量水平或垂直，但要保留真正的對角支路。對角端子必須是兩個接點，不是符號 bbox。server 會把座標 snap 成 16 倍數、合併附近接點，並在 T 形分岔拆開導線。",
         "如果是相片，只追蹤真正連接的端子與導線，忽略未接上的鬆散導線和背景物件。",
         "不要輸出 Falstad dump code。"
       ].join("\n")
@@ -592,7 +598,7 @@ def build_circuit_code_payload(prompt_text, image_data_url, output_language, mod
     output_language.to_s == "en" ? "Output only plain Falstad code. No JSON, no markdown, no explanations." : "只輸出 Falstad 純文字代碼，不要 JSON，不要 markdown，不要解釋。",
     output_language.to_s == "en" ? "Every X and Y coordinate in the Falstad code must be an integer multiple of 16, whether the user provided text or a photo." : "無論使用者輸入文字或相片，Falstad code 裡每一個 X 與 Y 座標都必須是 16 的倍數整數。",
     output_language.to_s == "en" ? "Use legal Falstad elements only. Use 6V or 9V batteries when needed." : "只使用合法的 Falstad 元件；如需要電池，請用 6V 或 9V。",
-    output_language.to_s == "en" ? "Never use shorthand element lines. Use these exact formats: battery `v x1 y1 x2 y2 0 0 40 voltage 0 0 0.5`; switch `s x1 y1 x2 y2 0 position false`; resistor `r x1 y1 x2 y2 0 resistance`; wire `w x1 y1 x2 y2 0`." : "絕不可使用簡寫元件行。請使用這些完整格式：電池 `v x1 y1 x2 y2 0 0 40 voltage 0 0 0.5`；開關 `s x1 y1 x2 y2 0 position false`；電阻 `r x1 y1 x2 y2 0 resistance`；導線 `w x1 y1 x2 y2 0`。",
+    output_language.to_s == "en" ? "Never use shorthand element lines. Use these exact formats: battery `v x1 y1 x2 y2 0 0 40 voltage 0 0 0.5`; switch `s x1 y1 x2 y2 0 position false`; resistor `r x1 y1 x2 y2 0 resistance`; wire `w x1 y1 x2 y2 0`. A diagonal bridge resistor is allowed, for example `r 160 128 448 256 0 100`. Terminals must be the two junction nodes, not the drawn symbol box. Falstad only joins identical endpoints; do not land an endpoint on the middle of another part." : "絕不可使用簡寫元件行。請使用這些完整格式：電池 `v x1 y1 x2 y2 0 0 40 voltage 0 0 0.5`；開關 `s x1 y1 x2 y2 0 position false`；電阻 `r x1 y1 x2 y2 0 resistance`；導線 `w x1 y1 x2 y2 0`。橋式對角電阻可以斜放，例如 `r 160 128 448 256 0 100`。端子必須是兩個接點，不是符號方框。Falstad 只在端點座標相同時才接駁；不要把端點落在另一個元件的中段。",
     output_language.to_s == "en" ? "For a battery, (x1,y1) is the negative short plate and (x2,y2) is the positive long plate. For example, a 9V battery must be `v 160 240 160 160 0 0 40 9 0 0 0.5`, not `v 160 240 160 160 0 9`." : "電池的 (x1,y1) 是負極短極板，(x2,y2) 是正極長極板。例如 9V 電池必須寫成 `v 160 240 160 160 0 0 40 9 0 0 0.5`，不可寫成 `v 160 240 160 160 0 9`。",
     output_language.to_s == "en" ? "If you use an ammeter, use Falstad ammeter code with the circular symbol enabled. If you use a voltmeter, use the circular voltmeter/probe symbol and a high resistance so it behaves like a meter in class diagrams." : "如果使用安培計，請使用帶圓形符號的 Falstad ammeter 代碼；如果使用伏特計，請使用帶圓形符號的 voltmeter/probe，並設定高電阻，使其符合課堂圖示與理想伏特計用途。",
     output_language.to_s == "en" ? "Do not add x text labels, arrows, callouts, or decorative helper lines unless the user explicitly asks for them." : "除非使用者明確要求，否則不要加入 x 文字標示、箭頭、指示線或裝飾性輔助圖形。",
@@ -662,325 +668,7 @@ def parse_circuit_schema_json(raw_text)
   parsed
 end
 
-def snap_to_grid(value)
-  ((value.to_f / GRID_SIZE).round * GRID_SIZE).to_i
-end
-
-def schema_coordinate!(value, key)
-  number = Float(value)
-  if number >= 0.0 && number <= 1.0
-    axis = key.to_s.include?("x") ? :x : :y
-    base = axis == :x ? PHOTO_LAYOUT_ORIGIN_X : PHOTO_LAYOUT_ORIGIN_Y
-    span = axis == :x ? PHOTO_LAYOUT_WIDTH : PHOTO_LAYOUT_HEIGHT
-    return snap_to_grid(base + (number * span))
-  end
-
-  snap_to_grid(number)
-rescue ArgumentError, TypeError
-  raise "#{key} 必須是數值座標。"
-end
-
-def positive_number(value, default)
-  number = value.nil? ? default : value.to_f
-  number.positive? ? number : default
-end
-
-def bounded_ratio(value, default = 0.5)
-  number = value.nil? ? default : value.to_f
-  [[number, 0.05].max, 0.95].min
-end
-
-def coordinate_pair(value)
-  if value.is_a?(Array) && value.length >= 2
-    return [value[0], value[1]]
-  end
-
-  if value.is_a?(Hash)
-    keyed = value.transform_keys(&:to_s)
-    x = keyed["x"] || keyed["0"]
-    y = keyed["y"] || keyed["1"]
-    return [x, y] unless x.nil? || y.nil?
-  end
-
-  nil
-end
-
-BATTERY_NEGATIVE_KEYS = %w[negative minus black neg -].freeze
-BATTERY_POSITIVE_KEYS = %w[positive plus red pos +].freeze
-
-def lookup_named_coordinate(source, keys)
-  return nil unless source.is_a?(Hash)
-
-  keyed = source.transform_keys { |key| key.to_s.downcase }
-  keys.each do |key|
-    pair = coordinate_pair(keyed[key])
-    return pair if pair
-  end
-  nil
-end
-
-def polarity_terminal_pair(component)
-  negative = lookup_named_coordinate(component, BATTERY_NEGATIVE_KEYS)
-  positive = lookup_named_coordinate(component, BATTERY_POSITIVE_KEYS)
-  if component["terminals"].is_a?(Hash)
-    negative ||= lookup_named_coordinate(component["terminals"], BATTERY_NEGATIVE_KEYS)
-    positive ||= lookup_named_coordinate(component["terminals"], BATTERY_POSITIVE_KEYS)
-  end
-  return [negative, positive] if negative && positive
-
-  nil
-end
-
-def apply_battery_polarity!(component)
-  pair = polarity_terminal_pair(component)
-  return component unless pair
-
-  negative, positive = pair
-  component["x1"] = negative[0]
-  component["y1"] = negative[1]
-  component["x2"] = positive[0]
-  component["y2"] = positive[1]
-  component
-end
-
-def terminal_pair_from_component(component)
-  terminals = component["terminals"]
-  return nil unless terminals.is_a?(Hash)
-
-  keyed = terminals.transform_keys { |key| key.to_s.downcase }
-  key_pairs = [
-    %w[a b],
-    %w[t1 t2],
-    %w[terminal1 terminal2],
-    %w[left right],
-    %w[top bottom]
-  ]
-
-  key_pairs.each do |first_key, second_key|
-    first_pair = coordinate_pair(keyed[first_key])
-    second_pair = coordinate_pair(keyed[second_key])
-    return [first_pair, second_pair] if first_pair && second_pair
-  end
-
-  pairs = keyed.values.map { |value| coordinate_pair(value) }.compact
-  pairs.length >= 2 ? pairs.first(2) : nil
-end
-
-def endpoint_pair_from_bbox(component)
-  bbox = component["bbox"]
-  return nil unless bbox.is_a?(Array) && bbox.length >= 4
-
-  left, top, right, bottom = bbox.first(4).map(&:to_f)
-  left, right = [left, right].minmax
-  top, bottom = [top, bottom].minmax
-  center_x = (left + right) / 2.0
-  center_y = (top + bottom) / 2.0
-  width = right - left
-  height = bottom - top
-
-  orientation = component["orientation"].to_s.downcase
-  orientation = width >= height ? "horizontal" : "vertical" unless %w[horizontal vertical].include?(orientation)
-
-  if orientation == "vertical"
-    [[center_x, top], [center_x, bottom]]
-  else
-    [[left, center_y], [right, center_y]]
-  end
-end
-
-def apply_schema_endpoint_aliases!(component)
-  endpoint_pairs = [
-    ["p1", "p2"],
-    ["from", "to"],
-    ["start", "end"],
-    ["terminal1", "terminal2"],
-    ["t1", "t2"],
-    ["a", "b"],
-    ["left", "right"],
-    ["top", "bottom"]
-  ]
-
-  endpoint_pairs.each do |first_key, second_key|
-    first_pair = coordinate_pair(component[first_key])
-    second_pair = coordinate_pair(component[second_key])
-    next unless first_pair && second_pair
-
-    component["x1"] ||= first_pair[0]
-    component["y1"] ||= first_pair[1]
-    component["x2"] ||= second_pair[0]
-    component["y2"] ||= second_pair[1]
-    break
-  end
-
-  terminal_pair = terminal_pair_from_component(component)
-  if terminal_pair
-    component["x1"] ||= terminal_pair[0][0]
-    component["y1"] ||= terminal_pair[0][1]
-    component["x2"] ||= terminal_pair[1][0]
-    component["y2"] ||= terminal_pair[1][1]
-  end
-
-  bbox_pair = endpoint_pair_from_bbox(component)
-  if bbox_pair
-    component["x1"] ||= bbox_pair[0][0]
-    component["y1"] ||= bbox_pair[0][1]
-    component["x2"] ||= bbox_pair[1][0]
-    component["y2"] ||= bbox_pair[1][1]
-  end
-
-  component
-end
-
-def orthogonalize_component!(component)
-  return component if component["type"] == "variable_resistor"
-  return component if component["x1"] == component["x2"] || component["y1"] == component["y2"]
-
-  orientation = component["orientation"].to_s.downcase
-  unless %w[horizontal vertical].include?(orientation)
-    orientation = (component["x2"] - component["x1"]).abs >= (component["y2"] - component["y1"]).abs ? "horizontal" : "vertical"
-  end
-
-  if orientation == "vertical"
-    component["x2"] = component["x1"]
-  else
-    component["y2"] = component["y1"]
-  end
-
-  component
-end
-
-def component_midpoint(component)
-  [
-    ((component["x1"] + component["x2"]) / 2.0).round,
-    ((component["y1"] + component["y2"]) / 2.0).round
-  ]
-end
-
-def build_text_label_line(text, x, y, size: 20)
-  escaped = text.to_s.strip.gsub("\\", "\\\\\\").gsub(" ", "\\s").gsub("+", "%2B")
-  "x #{x} #{y} #{x + 16} #{y} 4 #{size} #{escaped}"
-end
-
-def build_component_label_lines(component)
-  label_text = component["label"].to_s.strip
-  label_text = component["id"].to_s.strip if label_text.empty?
-
-  return [] if label_text.empty?
-
-  mid_x, mid_y = component_midpoint(component)
-  if component["x1"] == component["x2"]
-    [build_text_label_line(label_text, mid_x + 24, mid_y)]
-  else
-    [build_text_label_line(label_text, mid_x - 8, mid_y - 32)]
-  end
-end
-
-def normalize_schema_component(component, index)
-  raise "第 #{index + 1} 個元件不是有效物件。" unless component.is_a?(Hash)
-
-  normalized = component.transform_keys(&:to_s)
-  apply_schema_endpoint_aliases!(normalized)
-  normalized["type"] = normalize_component_type(normalized["type"])
-  raise "第 #{index + 1} 個元件缺少有效 type。" unless SUPPORTED_CIRCUIT_COMPONENT_TYPES.include?(normalized["type"])
-  apply_battery_polarity!(normalized) if normalized["type"] == "battery"
-
-  %w[x1 y1 x2 y2].each do |key|
-    normalized[key] = schema_coordinate!(normalized[key], "元件 #{index + 1} 的 #{key}")
-  end
-
-  orthogonalize_component!(normalized)
-
-  if normalized["type"] != "variable_resistor" && normalized["x1"] != normalized["x2"] && normalized["y1"] != normalized["y2"]
-    raise "元件 #{index + 1}（#{normalized["type"]}）必須保持水平或垂直。"
-  end
-
-  if normalized["type"] == "variable_resistor"
-    unless normalized["x1"] == normalized["x2"] || normalized["y1"] == normalized["y2"]
-      raise "variable_resistor 的主體必須保持水平或垂直。"
-    end
-
-    if normalized["y1"] == normalized["y2"]
-      normalized["wiper_x"] = schema_coordinate!(normalized["wiper_x"] || ((normalized["x1"] + normalized["x2"]) / 2), "元件 #{index + 1} 的 wiper_x")
-      normalized["wiper_y"] = schema_coordinate!(normalized["wiper_y"], "元件 #{index + 1} 的 wiper_y")
-    else
-      normalized["wiper_x"] = schema_coordinate!(normalized["wiper_x"], "元件 #{index + 1} 的 wiper_x")
-      normalized["wiper_y"] = schema_coordinate!(normalized["wiper_y"] || ((normalized["y1"] + normalized["y2"]) / 2), "元件 #{index + 1} 的 wiper_y")
-    end
-  end
-
-  normalized
-end
-
-def compile_battery_line(component)
-  voltage = positive_number(component["voltage"], 9)
-  # Falstad DC battery: (x1,y1) = negative short plate, (x2,y2) = positive long plate.
-  "v #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0 0 40 #{voltage} 0 0 0.5"
-end
-
-def compile_resistor_like_line(component)
-  resistance_default = component["type"] == "internal_resistance" ? 1 : 100
-  resistance = positive_number(component["resistance"], resistance_default)
-  "r #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0 #{resistance}"
-end
-
-def compile_switch_line(component)
-  state = component["state"].to_s.strip.downcase
-  position = state == "open" ? 1 : 0
-  "s #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0 #{position} false"
-end
-
-def compile_variable_resistor_line(component)
-  max_resistance = positive_number(component["max_resistance"] || component["resistance"], 1000)
-  position = bounded_ratio(component["position"], 0.5)
-  slider_label = component["label"].to_s.strip
-  slider_label = component["id"].to_s.strip if slider_label.empty?
-  slider_label = "Resistance" if slider_label.empty?
-  slider_label = slider_label.gsub("\\", "\\\\\\").gsub(" ", "\\s")
-
-  if component["y1"] == component["y2"]
-    raw_x2 = component["x2"]
-    raw_y2 = component["wiper_y"]
-  else
-    raw_x2 = component["wiper_x"]
-    raw_y2 = component["y2"]
-  end
-
-  "174 #{component["x1"]} #{component["y1"]} #{raw_x2} #{raw_y2} 1 #{max_resistance} #{position} #{slider_label}"
-end
-
-def compile_course_component(component)
-  case component["type"]
-  when "wire"
-    "w #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0"
-  when "battery"
-    compile_battery_line(component)
-  when "resistor", "internal_resistance"
-    compile_resistor_like_line(component)
-  when "variable_resistor"
-    compile_variable_resistor_line(component)
-  when "lamp"
-    "181 #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 0 300 100 120 0.4 0.4"
-  when "switch"
-    compile_switch_line(component)
-  when "ammeter"
-    "370 #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 3 0"
-  when "voltmeter"
-    "p #{component["x1"]} #{component["y1"]} #{component["x2"]} #{component["y2"]} 3 0 10000000"
-  else
-    raise "不支援的元件類型：#{component["type"]}"
-  end
-end
-
-def compile_course_schema_to_falstad(parsed_schema)
-  components = Array(parsed_schema["components"] || parsed_schema[:components])
-  raise "AI 沒有回傳任何元件。" if components.empty?
-
-  normalized_components = components.each_with_index.map { |component, index| normalize_schema_component(component, index) }
-  element_lines = normalized_components.map { |component| compile_course_component(component) }
-  label_lines = normalized_components.flat_map { |component| build_component_label_lines(component) }
-
-  ([FALSTAD_HEADER] + element_lines + label_lines).join("\n")
-end
+require_relative "circuit_schema_compiler"
 
 def generate_circuit_schema(prompt_text, image_data_url, output_language, api_key, model)
   raise_if_job_canceled!

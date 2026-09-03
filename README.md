@@ -278,6 +278,8 @@ r 224 128 320 128 0 100
 
 如要把電阻改成 `50 ohm`，把最後的 `100` 改成 `50`。
 
+橋式電路的對角電阻可以斜放，兩端仍要接到接點，例如 `r 160 128 448 256 0 100`。不要把斜電阻畫成浮在半空的水平短方框。
+
 ### 燈泡 `181`
 
 格式：
@@ -505,7 +507,7 @@ w 416 224 128 224 0
 4. 只可使用這些 component type：
    wire, battery, resistor, internal_resistance, variable_resistor, lamp, switch, ammeter, voltmeter
 5. 所有 x1, y1, x2, y2, wiper_x, wiper_y 必須是 16 的倍數。
-6. wire, resistor, lamp, switch, ammeter, voltmeter, battery, internal_resistance 必須水平或垂直。
+6. 導線和大多數元件請盡量水平或垂直。若原圖有對角支路（橋式／Wheatstone），resistor、lamp、wire 可以對角；兩個端子必須是電氣接點，不可用符號 bbox。Falstad 只在端點座標完全相同時才接駁；T 形分岔要在接點拆開導線，交叉而無圓點不相接。
 7. 所有轉角、外框、分支都用 wire 表示。
 8. 如果有燈泡，使用 type="lamp"，不要用 resistor 代替。
 9. 如果有安培計，使用 type="ammeter"；如果有伏特計，使用 type="voltmeter"。

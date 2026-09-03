@@ -3,3 +3,4 @@
 .env.*
 !.env.example
 server-config.local.json
+VIBE-CODING-JOURNEY.md
