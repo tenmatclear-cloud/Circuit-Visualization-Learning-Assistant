@@ -1,4 +1,4 @@
-const CACHE_NAME = 'circuitjs1-app-cache-v2';
+const CACHE_NAME = 'circuitjs1-app-cache-v3';
 const urlsToCache = [
   '/circuit/about.html',
   '/circuit/canvas2svg.js',
@@ -21,7 +21,9 @@ const urlsToCache = [
 ];
 
 function isNetworkFirst(url) {
-  return /circuitjs[^/]*\.html(?:\?|$)/.test(url) || url.includes('.nocache.js');
+  return /circuitjs[^/]*\.html(?:\?|$)/.test(url)
+    || url.includes('.nocache.js')
+    || url.includes('.cache.js');
 }
 
 self.addEventListener('install', event => {

@@ -27,7 +27,7 @@ import com.google.gwt.i18n.client.NumberFormat;
 
 // circuit element class
 public abstract class CircuitElm implements Editable {
-    static double voltageRange = 5;
+    static double voltageRange = 12;
     static int colorScaleCount = 32;
     static Color colorScale[];
     static double currentMult, powerMult;
@@ -123,16 +123,38 @@ public abstract class CircuitElm implements Editable {
 	    negativeColor = Color.red;
 	if (neutralColor == null)
 	    neutralColor = Color.gray;
+
+	// Teaching scale: gray → blue → cyan → green → yellow for +V.
+	// 12 V is full yellow. Negative voltages stay gray → red.
+	Color stopBlue = new Color(50, 120, 255);
+	Color stopCyan = new Color(0, 210, 220);
+	Color stopGreen = new Color(40, 210, 50);
+	Color stopYellow = new Color(240, 215, 40);
+	Color positiveStops[] = {
+	    neutralColor, stopBlue, stopCyan, stopGreen, stopYellow
+	};
 	
 	for (i = 0; i != colorScaleCount; i++) {
 	    double v = i * 2. / colorScaleCount - 1;
 	    if (v < 0) {
 		colorScale[i] = new Color(neutralColor, negativeColor, -v);
 	    } else {
-		colorScale[i] = new Color(neutralColor, positiveColor, v);
+		colorScale[i] = mixColorStops(positiveStops, v);
 	    }
 	}
 
+    }
+
+    static Color mixColorStops(Color stops[], double t) {
+	if (t <= 0)
+	    return stops[0];
+	if (t >= 1)
+	    return stops[stops.length - 1];
+	double scaled = t * (stops.length - 1);
+	int i = (int) scaled;
+	if (i >= stops.length - 1)
+	    return stops[stops.length - 1];
+	return new Color(stops[i], stops[i + 1], scaled - i);
     }
     
     // create new element with one post at xx,yy, to be dragged out by user

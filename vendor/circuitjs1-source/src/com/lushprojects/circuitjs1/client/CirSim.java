@@ -3520,7 +3520,7 @@ MouseOutHandler, MouseWheelHandler {
 	    speedBar.setValue(117); // 57
 	    currentBar.setValue(50);
 	    powerBar.setValue(50);
-	    CircuitElm.voltageRange = 5;
+	    CircuitElm.voltageRange = 12;
 	    scopeCount = 0;
 	    lastIterTime = 0;
 	}

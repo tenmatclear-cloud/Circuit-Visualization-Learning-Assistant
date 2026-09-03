@@ -10,7 +10,8 @@ const APP_CONFIG = {
     en: "/circuit/circuitjs.html?lang=en&startCircuit=blank.txt&whiteBackground=false",
   },
   teachingCurrentSpeed: 42,
-  teachingFalstadHeader: "$ 1 0.000005 10.20027730826997 42 5 43",
+  teachingVoltageRange: 12,
+  teachingFalstadHeader: "$ 1 0.000005 10.20027730826997 42 12 43",
   examplesEndpoint: "/examples.md",
   libraryCatalogEndpoint: "/assets/examples/library/catalog.json",
   sampleCircuitImage: "/assets/examples/sample-circuit.jpg",
@@ -27,7 +28,7 @@ const translations = {
     quickGuideStep1:
       "在左側輸入文字，或上載電路圖／相片。可按「串聯示例」「並聯示例」，或按「載入範例圖」。要現成電路可先去「範例電路」。",
     quickGuideStep2: "按「生成電路」，等待右側模擬器出現電路。",
-    quickGuideStep3: "看黃色小點（電流）和顏色深淺（電壓）。可點開關，或拖曳元件改正線路。",
+    quickGuideStep3: "看黃色小點（電流）和導線顏色（電壓：灰→藍→青→綠→黃，12 V 到頂）。可點開關，或拖曳元件改正線路。",
     quickGuideStep4: "需要課堂提問時，再開「教學指引」或「解題教學」。",
     quickGuideTipsTitle: "使用建議",
     quickGuideTip1: "文字愈具體愈好：寫明電壓、串聯或並聯、燈泡還是電阻。",
@@ -96,7 +97,7 @@ const translations = {
     exportCodeButton: "從右側匯出目前電路",
     flowTitle: "模擬器簡易操作",
     flowItem1: "黃色小點代表電流方向；可在右側「電流速度」再調慢，方便看清楚。",
-    flowItem2: "顏色深淺代表電壓高低。",
+    flowItem2: "導線顏色代表電壓高低：灰→藍→青→綠→黃，12 V 到頂。",
     flowItem3: "若線路歪了或接錯，用滑鼠拖曳元件或接線端點改正，不必改左側代碼。",
     flowItem4: "右鍵可刪除接錯的線；開關可以直接點擊開合。",
     flowItem5: "觀察串聯是否只有一條路徑，並聯是否在分岔後分開。",
@@ -160,7 +161,7 @@ const translations = {
       "Type a request on the left, or upload a circuit image. You can also use Series / Parallel, Load sample image, or open Example circuits for ready-made diagrams.",
     quickGuideStep2: "Click Generate Circuit and wait for the circuit to appear on the right.",
     quickGuideStep3:
-      "Watch the yellow dots (current) and the color shading (voltage). Click a switch, or drag a part to fix a wire.",
+      "Watch the yellow dots (current) and the wire color (voltage: gray → blue → cyan → green → yellow, topping out at 12 V). Click a switch, or drag a part to fix a wire.",
     quickGuideStep4: "If you need classroom questions, open Teaching Guide or Tutoring Draft.",
     quickGuideTipsTitle: "Tips",
     quickGuideTip1: "Be specific: say the voltage, series or parallel, and lamps or resistors.",
@@ -234,7 +235,7 @@ const translations = {
     exportCodeButton: "Export Current Circuit",
     flowTitle: "How to use the simulator",
     flowItem1: "Yellow dots show current direction. Use Current Speed on the right if the dots move too fast.",
-    flowItem2: "Color shading shows voltage level.",
+    flowItem2: "Wire color shows voltage: gray → blue → cyan → green → yellow, topping out at 12 V.",
     flowItem3: "If the layout is crooked or a wire is wrong, drag the part or the wire end. You do not need to edit code.",
     flowItem4: "Right-click to delete a wrong wire. Click a switch to open or close it.",
     flowItem5: "In series, look for a single path. In parallel, look for the current splitting at a branch.",
@@ -1421,11 +1422,16 @@ function withTeachingCurrentSpeed(code) {
   }
 
   if (/<cir[\s>]/.test(source)) {
-    if (/\bcb="\d+"/.test(source)) {
-      return source.replace(/\bcb="\d+"/, `cb="${APP_CONFIG.teachingCurrentSpeed}"`);
+    let next = source;
+    if (/\bcb="\d+"/.test(next)) {
+      next = next.replace(/\bcb="\d+"/, `cb="${APP_CONFIG.teachingCurrentSpeed}"`);
+    } else {
+      next = next.replace(/<cir\b/, `<cir cb="${APP_CONFIG.teachingCurrentSpeed}"`);
     }
-
-    return source.replace(/<cir\b/, `<cir cb="${APP_CONFIG.teachingCurrentSpeed}"`);
+    if (/\bvr="[^"]*"/.test(next)) {
+      return next.replace(/\bvr="[^"]*"/, `vr="${APP_CONFIG.teachingVoltageRange}"`);
+    }
+    return next.replace(/<cir\b/, `<cir vr="${APP_CONFIG.teachingVoltageRange}"`);
   }
 
   const lines = source.split("\n");
@@ -1438,6 +1444,11 @@ function withTeachingCurrentSpeed(code) {
   const tokens = lines[headerIndex].trim().split(/\s+/);
   if (tokens.length >= 5 && tokens[0] === "$") {
     tokens[4] = String(APP_CONFIG.teachingCurrentSpeed);
+    if (tokens.length >= 6) {
+      tokens[5] = String(APP_CONFIG.teachingVoltageRange);
+    } else {
+      tokens.push(String(APP_CONFIG.teachingVoltageRange));
+    }
     lines[headerIndex] = tokens.join(" ");
     return lines.join("\n");
   }

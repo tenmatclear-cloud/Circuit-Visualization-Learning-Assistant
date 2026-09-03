@@ -13033,13 +13033,32 @@ function min_1(a, b){
 }
 
 function setColorScale(){
-  var i, v;
+  var i, v, t, scaled, si, local, stop0, stop1, stop2, stop3, stop4;
   !positiveColor_0 && (positiveColor_0 = ($clinit_Color() , green));
   !negativeColor_0 && (negativeColor_0 = ($clinit_Color() , red));
   !neutralColor_0 && (neutralColor_0 = ($clinit_Color() , gray));
+  stop0 = neutralColor_0;
+  stop1 = new Color(50, 120, 255);
+  stop2 = new Color(0, 210, 220);
+  stop3 = new Color(40, 210, 50);
+  stop4 = new Color(240, 215, 40);
   for (i = 0; i != colorScaleCount; i++) {
     v = i * 2 / colorScaleCount - 1;
-    v < 0?(colorScale[i] = new Color_0(neutralColor_0, negativeColor_0, -v)):(colorScale[i] = new Color_0(neutralColor_0, positiveColor_0, v));
+    if (v < 0)
+      colorScale[i] = new Color_0(neutralColor_0, negativeColor_0, -v);
+    else {
+      t = v;
+      if (t <= 0)
+        colorScale[i] = stop0;
+      else if (t >= 1)
+        colorScale[i] = stop4;
+      else {
+        scaled = t * 4;
+        si = scaled | 0;
+        local = scaled - si;
+        colorScale[i] = si == 0?new Color_0(stop0, stop1, local):si == 1?new Color_0(stop1, stop2, local):si == 2?new Color_0(stop2, stop3, local):new Color_0(stop3, stop4, local);
+      }
+    }
   }
 }
 
@@ -13374,7 +13393,7 @@ _.x_0 = 0;
 _.x2 = 0;
 _.y_0 = 0;
 _.y2 = 0;
-var app_0, colorScale, colorScaleCount = 201, currentColor_0, currentMult_0 = 0, decimalDigits = 0, fixedFormat, lightGrayColor, mouseElmRef = null, negativeColor_0, neutralColor_0, positiveColor_0, powerMult = 0, ps1, ps2, selectColor_0, shortDecimalDigits = 0, shortFormat, showFormat, sim_0, unitsFont, voltageRange = 5, whiteColor;
+var app_0, colorScale, colorScaleCount = 201, currentColor_0, currentMult_0 = 0, decimalDigits = 0, fixedFormat, lightGrayColor, mouseElmRef = null, negativeColor_0, neutralColor_0, positiveColor_0, powerMult = 0, ps1, ps2, selectColor_0, shortDecimalDigits = 0, shortFormat, showFormat, sim_0, unitsFont, voltageRange = 12, whiteColor;
 var Lcom_lushprojects_circuitjs1_client_CircuitElm_2_classLit = createForClass('com.lushprojects.circuitjs1.client', 'CircuitElm', 7);
 function $drawWaveform(this$static, g, center){
   var i, s, xc, xc2, yc, yy;
@@ -18341,7 +18360,7 @@ function $clearCircuit(this$static){
   $setValue_2(this$static.app.ui.speedBar, 117);
   $setValue_2(this$static.app.ui.currentBar, 50);
   $setValue_2(this$static.app.ui.powerBar, 50);
-  voltageRange = 5;
+  voltageRange = 12;
   this$static.scopes.scopeCount = 0;
   this$static.sim.lastIterTime = 0;
   this$static.app.contextStack.arrayList.array.length == 0 && ($reset_10(localModelMap) , ++sequenceNumber);
