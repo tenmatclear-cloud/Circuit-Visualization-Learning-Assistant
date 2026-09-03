@@ -95,6 +95,12 @@ const translations = {
     apiKeyStatusReady: "已有可用金鑰，可以生成。",
     refreshSimulatorButton: "重新檢查模擬器",
     exportCodeButton: "從右側匯出目前電路",
+    siteCreditByline: "© 2026 TenmaWong",
+    siteCreditReuse: "本網站歡迎使用與改作，請保留作者標示。",
+    siteCreditSimulatorBefore: "電路模擬器核心來自 ",
+    siteCreditSimulatorAfter: "（GPL）。",
+    siteCreditSourceLink: "原始碼",
+    siteCreditFeedbackLink: "意見回饋",
     flowTitle: "模擬器簡易操作",
     flowItem1: "黃色小點代表電流方向；可在右側「電流速度」再調慢，方便看清楚。",
     flowItem2: "導線顏色代表電壓高低：灰→藍→青→綠→黃，12 V 到頂。",
@@ -233,6 +239,12 @@ const translations = {
     apiKeyStatusReady: "A key is ready. You can generate now.",
     refreshSimulatorButton: "Recheck Simulator",
     exportCodeButton: "Export Current Circuit",
+    siteCreditByline: "© 2026 TenmaWong",
+    siteCreditReuse: "You are welcome to use and adapt this site. Please keep the author credit.",
+    siteCreditSimulatorBefore: "The circuit simulator core is from ",
+    siteCreditSimulatorAfter: " (GPL).",
+    siteCreditSourceLink: "Source",
+    siteCreditFeedbackLink: "Feedback",
     flowTitle: "How to use the simulator",
     flowItem1: "Yellow dots show current direction. Use Current Speed on the right if the dots move too fast.",
     flowItem2: "Wire color shows voltage: gray → blue → cyan → green → yellow, topping out at 12 V.",
@@ -371,6 +383,12 @@ const els = {
   flowItem3: document.getElementById("flowItem3"),
   flowItem4: document.getElementById("flowItem4"),
   flowItem5: document.getElementById("flowItem5"),
+  siteCreditByline: document.getElementById("siteCreditByline"),
+  siteCreditReuse: document.getElementById("siteCreditReuse"),
+  siteCreditSimulatorBefore: document.getElementById("siteCreditSimulatorBefore"),
+  siteCreditSimulatorAfter: document.getElementById("siteCreditSimulatorAfter"),
+  siteCreditSourceLink: document.getElementById("siteCreditSourceLink"),
+  siteCreditFeedbackLink: document.getElementById("siteCreditFeedbackLink"),
   healthBanner: document.getElementById("healthBanner"),
   healthBannerText: document.getElementById("healthBannerText"),
   healthBannerKeyButton: document.getElementById("healthBannerKeyButton"),
@@ -740,6 +758,14 @@ function renderLanguage() {
   els.flowItem3.textContent = t("flowItem3");
   els.flowItem4.textContent = t("flowItem4");
   els.flowItem5.textContent = t("flowItem5");
+  if (els.siteCreditByline) {
+    els.siteCreditByline.textContent = t("siteCreditByline");
+    els.siteCreditReuse.textContent = t("siteCreditReuse");
+    els.siteCreditSimulatorBefore.textContent = t("siteCreditSimulatorBefore");
+    els.siteCreditSimulatorAfter.textContent = t("siteCreditSimulatorAfter");
+    els.siteCreditSourceLink.textContent = t("siteCreditSourceLink");
+    els.siteCreditFeedbackLink.textContent = t("siteCreditFeedbackLink");
+  }
   els.langZhButton.classList.toggle("is-active", currentLanguage === "zh-Hant");
   els.langEnButton.classList.toggle("is-active", currentLanguage === "en");
   renderApiKeyUi();

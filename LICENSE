@@ -1,0 +1,13 @@
+Copyright (c) 2026 TenmaWong
+
+This repository contains more than one work.
+
+1. Original teaching-site materials
+   (for example index.html, app.js, server.rb, examples, and project
+   documentation) are licensed under the MIT License.
+   See LICENSE-MIT.
+
+2. The bundled circuit simulator in falstad/ and
+   vendor/circuitjs1-source/ is CircuitJS1 by Paul Falstad and
+   contributors. It remains under the GNU GPL v2 or later.
+   See the license notices in those folders.

@@ -524,6 +524,33 @@ details.output-card textarea {
   margin-top: 14px;
 }
 
+.site-credit {
+  margin-top: 10px;
+  padding: 6px 4px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.site-credit p {
+  margin: 0;
+}
+
+.site-credit-byline {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.site-credit a {
+  color: var(--teal);
+}
+
+.site-credit a:hover {
+  color: var(--accent-strong);
+}
+
 .exit-present-button {
   display: none;
 }
@@ -804,6 +831,7 @@ body.is-presenting .eyebrow,
 body.is-presenting .quick-guide,
 body.is-presenting .control-panel,
 body.is-presenting .tips-card,
+body.is-presenting .site-credit,
 body.is-presenting .health-banner,
 body.is-presenting .panel-kicker,
 body.is-presenting #presentButton {

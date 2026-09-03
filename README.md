@@ -553,3 +553,11 @@ w 416 224 128 224 0
 3. 加入生成紀錄與教師題庫
 4. 加入 Falstad code 驗證器
 5. 加入學生操作紀錄與學習歷程
+
+## 授權
+
+本專案由 TenmaWong 製作。
+
+- 教學網站本身的原始碼（介面、compiler、範例等）以 MIT 授權：歡迎使用與改作，請保留作者標示。見 `LICENSE-MIT`。
+- 內建的電路模擬器來自 Paul Falstad / CircuitJS1，維持其 GPL。見 `falstad/` 與 `vendor/circuitjs1-source/`。
+
